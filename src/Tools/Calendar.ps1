@@ -22,13 +22,15 @@ function Invoke-OutlookReadCalendar {
         $count = 0
         foreach ($item in $restricted) {
             if ($count -ge $MaxItems) { break }
+            $org = try { $item.Organizer } catch { "" }
+            $bod = try { $item.Body.Substring(0, [Math]::Min(200, $item.Body.Length)) } catch { "" }
             $results += @{
                 Subject   = $item.Subject
                 Start     = $item.Start.ToString("yyyy-MM-dd HH:mm")
                 End       = $item.End.ToString("yyyy-MM-dd HH:mm")
                 Location  = $item.Location
-                Organizer = try { $item.Organizer } catch { "" }
-                Body      = try { $item.Body.Substring(0, [Math]::Min(200, $item.Body.Length)) } catch { "" }
+                Organizer = $org
+                Body      = $bod
             }
             $count++
         }
@@ -128,4 +130,42 @@ function Invoke-OutlookCreateMeeting {
         Write-StatusLine "ERR" "Meeting create failed: $_"
         return "ERROR: $_"
     }
+}
+
+function Invoke-OutlookDeleteAppointment {
+    param([string]$Subject)
+    Write-ToolLine "Calendar" "Deleting appointment" $Subject
+    try {
+        $outlook  = New-Object -ComObject Outlook.Application
+        $ns       = $outlook.GetNamespace("MAPI")
+        $calFolder = $ns.GetDefaultFolder(9)
+        $items    = $calFolder.Items
+        $items.IncludeRecurrences = $true
+        $items.Sort("[Start]")
+        
+        $now   = [DateTime]::Now
+        # Only search future appointments up to 60 days
+        $end   = $now.AddDays(60)
+        $filter = "[Start] >= '$($now.ToString("g"))' AND [Start] <= '$($end.ToString("g"))'"
+        $restricted = $items.Restrict($filter)
+        
+        $found = $null
+        foreach ($item in $restricted) {
+            if ($item.Subject -match [regex]::Escape($Subject)) {
+                $found = $item
+                break
+            }
+        }
+        
+        if (-not $found) { return "ERROR: Appointment not found matching '$Subject'" }
+        
+        $subj = $found.Subject
+        Write-Host "  Delete appointment '$subj'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+        if ((Read-Host) -match '^[Yy]') {
+            $found.Delete()
+            Write-StatusLine "OK" "Appointment successfully deleted/cancelled"
+            return "Appointment deleted successfully."
+        }
+        return "Delete cancelled."
+    } catch { return "ERROR: $_" }
 }

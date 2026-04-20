@@ -28,13 +28,13 @@ function Invoke-OutlookReadEmails {
         $i = 0
         foreach ($item in $items) {
             if ($i -ge $Count) { break }
-            if ($Filter -and $item.Subject -notlike "*$Filter*" -and $item.SenderName -notlike "*$Filter*") { continue }
+            if ($Filter -and $item.Subject -notlike "*$Filter*" -and $item.SenderName -notlike "*$Filter*") { continue };
             $results += @{
                 Index       = $i + 1
                 Subject     = $item.Subject
                 Sender      = $item.SenderName
                 SenderEmail = $item.SenderEmailAddress
-                Received    = try { $item.ReceivedTime.ToString("yyyy-MM-dd HH:mm") } catch { "" }
+                Received    = try { $item.ReceivedTime.ToString("yyyy-MM-dd HH:mm") } catch { "" };
                 Body        = $item.Body.Substring(0, [Math]::Min(500, $item.Body.Length))
             }
             $i++
@@ -210,6 +210,51 @@ function Invoke-OutlookContactLookup {
                 }
             }
         } catch {}
+
+        # ── Pass 3: Recent Emails (Inbox & Sent) ─────────────────────────
+        try {
+            Write-StatusLine "INFO" "Checking recent emails for '$Name'"
+            $inbox = $ns.GetDefaultFolder(6).Items
+            $sent  = $ns.GetDefaultFolder(5).Items
+            try { $inbox.Sort("[ReceivedTime]", $true); $sent.Sort("[SentOn]", $true) } catch {}
+            
+            $lastName = if ($parts.Count -ge 2) { $parts[-1] } else { $Name }
+            $escLastName = '(?i)' + [regex]::Escape($lastName)
+            
+            for ($i = 1; $i -le 50; $i++) {
+                # Check Inbox (Senders)
+                if ($i -le $inbox.Count) {
+                    $item = try { $inbox.Item($i) } catch { $null }
+                    if ($item -and $item.SenderName -match $escLastName) {
+                        $email = try { $item.Sender.GetExchangeUser().PrimarySmtpAddress } catch { $null }
+                        if (-not $email -or $email -notmatch '@') { $email = try { $item.SenderEmailAddress } catch { "" } }
+                        if ($email -and $email -match '@') {
+                            Write-StatusLine "OK" "Recent emails (Inbox): $($item.SenderName) → $email"
+                            return $email
+                        }
+                    }
+                }
+                # Check Sent Items (Recipients)
+                if ($i -le $sent.Count) {
+                    $item = try { $sent.Item($i) } catch { $null }
+                    if ($item) {
+                        $recips = try { $item.Recipients } catch { $null }
+                        if ($recips) {
+                            foreach ($r in $recips) {
+                                if ($r.Name -match $escLastName) {
+                                    $email = try { $r.AddressEntry.GetExchangeUser().PrimarySmtpAddress } catch { $null }
+                                    if (-not $email -or $email -notmatch '@') { $email = try { $r.Address } catch { "" } }
+                                    if ($email -and $email -match '@') {
+                                        Write-StatusLine "OK" "Recent emails (Sent): $($r.Name) → $email"
+                                        return $email
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch { Write-StatusLine "WARN" "Recent emails search failed: $_" }
 
         Write-StatusLine "WARN" "No contact found for: $Name"
         return $null
@@ -435,4 +480,99 @@ function Invoke-OutlookDraftEmail {
         Write-StatusLine "ERR" "Draft failed: $_"
         return "ERROR: $_"
     }
+}
+
+# ============================================================
+# ADVANCED OUTLOOK COM (Reply, Forward, Delete, Flag)
+# ============================================================
+
+# Helper to find an email
+function Get-OutlookEmail {
+    param([string]$Query)
+    $outlook = New-Object -ComObject Outlook.Application
+    $ns = $outlook.GetNamespace("MAPI")
+    $inbox = $ns.GetDefaultFolder(6).Items
+    try { $inbox.Sort("[ReceivedTime]", $true) } catch {}
+    
+    if ($Query -match '^\d+$') {
+        $idx = [int]$Query
+        if ($idx -le $inbox.Count -and $idx -ge 1) { return $inbox.Item($idx) }
+    }
+    
+    $QueryEscaped = $Query -replace "'", "''"
+    $item = try { $inbox.Find("@SQL=""urn:schemas:httpmail:subject"" LIKE '%$QueryEscaped%'") } catch { $null }
+    if ($item) { return $item }
+    
+    for ($i = 1; $i -le 50; $i++) {
+        if ($i -le $inbox.Count) {
+            $item = $inbox.Item($i)
+            if ($item.Subject -match [regex]::Escape($Query) -or $item.SenderName -match [regex]::Escape($Query)) {
+                return $item
+            }
+        }
+    }
+    return $null
+}
+
+function Invoke-OutlookReplyEmail {
+    param([string]$Query, [string]$Body)
+    Write-ToolLine "Outlook" "Replying to email" $Query
+    try {
+        $item = Get-OutlookEmail -Query $Query
+        if (-not $item) { return "ERROR: Email not found matching '$Query'" }
+        $reply = $item.ReplyAll()
+        $sig = Get-OutlookSignature
+        $htmlBody = "<p>" + ($Body -replace "`n", "<br>") + "</p><br>" + ($sig -replace "`n", "<br>")
+        $reply.HTMLBody = $htmlBody + $reply.HTMLBody
+        $reply.Display()
+        Write-StatusLine "OK" "Draft reply opened"
+        return "Draft reply opened in Outlook."
+    } catch { return "ERROR: $_" }
+}
+
+function Invoke-OutlookForwardEmail {
+    param([string]$Query, [string]$To, [string]$Body)
+    Write-ToolLine "Outlook" "Forwarding email" $Query
+    try {
+        $item = Get-OutlookEmail -Query $Query
+        if (-not $item) { return "ERROR: Email not found matching '$Query'" }
+        $fwd = $item.Forward()
+        Add-MailRecipients -Mail $fwd -To $To -RecipientType 1
+        $sig = Get-OutlookSignature
+        $htmlBody = "<p>" + ($Body -replace "`n", "<br>") + "</p><br>" + ($sig -replace "`n", "<br>")
+        $fwd.HTMLBody = $htmlBody + $fwd.HTMLBody
+        $fwd.Display()
+        Write-StatusLine "OK" "Draft forward opened"
+        return "Draft forward opened in Outlook."
+    } catch { return "ERROR: $_" }
+}
+
+function Invoke-OutlookDeleteEmail {
+    param([string]$Query)
+    Write-ToolLine "Outlook" "Deleting email" $Query
+    try {
+        $item = Get-OutlookEmail -Query $Query
+        if (-not $item) { return "ERROR: Email not found matching '$Query'" }
+        $subj = $item.Subject
+        Write-Host "  Delete email '$subj'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+        if ((Read-Host) -match '^[Yy]') {
+            $item.Delete()
+            Write-StatusLine "OK" "Email softly deleted"
+            return "Email successfully deleted."
+        }
+        return "Delete cancelled."
+    } catch { return "ERROR: $_" }
+}
+
+function Invoke-OutlookFlagEmail {
+    param([string]$Query)
+    Write-ToolLine "Outlook" "Flagging email" $Query
+    try {
+        $item = Get-OutlookEmail -Query $Query
+        if (-not $item) { return "ERROR: Email not found matching '$Query'" }
+        $item.MarkAsTask(4)  # olMarkThisWeek
+        $item.Save()
+        Write-StatusLine "OK" "Email flagged"
+        return "Email flagged successfully."
+    } catch { return "ERROR: $_" }
 }

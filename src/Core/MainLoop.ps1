@@ -1,5 +1,5 @@
 function Start-AgentSession {
-    Write-Banner
+    Start-AnimatedBanner
     if (-not $script:CONFIG.ApiKey) {
         Write-StatusLine "ERR" "No API key found. Edit Config.ps1"
         return
@@ -27,11 +27,13 @@ function Start-AgentSession {
         $displayText = $displayText -replace '<JABBER>[\s\S]*?</JABBER>',     '[Jabber message queued]'
         $displayText = $displayText -replace '<EMAIL>[\s\S]*?</EMAIL>',       '[Email queued]'
         $displayText = $displayText -replace '<WORD>[\s\S]*?</WORD>',         '[Word document queued]'
+        $displayText = $displayText -replace '<EXCEL>[\s\S]*?</EXCEL>',        '[Excel action queued]'
         $displayText = $displayText -replace '<BROWSER>[\s\S]*?</BROWSER>',   '[Browser action queued]'
         $displayText = $displayText -replace '<CALENDAR>[\s\S]*?</CALENDAR>', '[Calendar action queued]'
         $displayText = $displayText -replace '<OPEN>[\s\S]*?</OPEN>',         '[File open queued]'
+        $displayText = $displayText -replace '<UIAUTOMATION>[\s\S]*?</UIAUTOMATION>', '[UI Automation action queued]'
         
-        Write-Host "`n  [AIRI] " -NoNewline -ForegroundColor Cyan
+        Write-Host "`n  [AIRWAV] " -NoNewline -ForegroundColor Cyan
         Write-Host $displayText.Trim() -ForegroundColor White
 
         $conversationHistory += @{ role = "assistant"; content = $responseText }

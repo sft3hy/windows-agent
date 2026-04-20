@@ -105,3 +105,36 @@ function Invoke-WordAppendText {
         return "ERROR: $_"
     }
 }
+
+function Invoke-WordReplaceText {
+    param([string]$FilePath, [string]$SearchText, [string]$ReplaceText)
+    Write-ToolLine "Word" "Replacing text" "'$SearchText' -> '$ReplaceText'"
+    try {
+        if (-not (Test-Path $FilePath)) { return "ERROR: File not found: $FilePath" }
+        $word = New-Object -ComObject Word.Application
+        $word.Visible = $false
+        $word.DisplayAlerts = 0
+        $doc = $word.Documents.Open($FilePath)
+
+        $find = $word.Selection.Find
+        $find.ClearFormatting()
+        $find.Replacement.ClearFormatting()
+        
+        $wdFindContinue = 1
+        $wdReplaceAll = 2
+        
+        $result = $find.Execute($SearchText, $false, $false, $false, $false, $false, $true, $wdFindContinue, $false, $ReplaceText, $wdReplaceAll)
+        
+        $doc.Save()
+        $doc.Close($false)
+        $word.Quit()
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null
+        
+        Write-StatusLine "OK" "Replaced text in $FilePath"
+        return "Text replaced successfully in $FilePath"
+    } catch {
+        Write-StatusLine "ERR" "Word replace failed: $_"
+        try { $word.Quit() } catch {}
+        return "ERROR: $_"
+    }
+}

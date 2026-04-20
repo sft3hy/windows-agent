@@ -181,6 +181,36 @@ $script:TOOLS = @{
             Invoke-OutlookContactLookup -Name $params.name
         }
     }
+
+    # --- UI AUTOMATION ---
+    "uia_launch" = @{
+        Description = "Launch an application. Params: app_path"
+        Handler = {
+            param($params)
+            Invoke-UIAutomationLaunch -AppPath $params.app_path
+        }
+    }
+    "uia_inspect" = @{
+        Description = "Inspect a window's layout and controls to get the visual tree. Params: window_title"
+        Handler = {
+            param($params)
+            Invoke-UIAutomationInspect -WindowTitle $params.window_title
+        }
+    }
+    "uia_click" = @{
+        Description = "Click a UI element in a window. Params: window_title, element_name, automation_id (optional)"
+        Handler = {
+            param($params)
+            Invoke-UIAutomationClick -WindowTitle $params.window_title -ElementName ($params.element_name ?? "") -AutomationId ($params.automation_id ?? "")
+        }
+    }
+    "uia_type" = @{
+        Description = "Type text into a UI element. Params: window_title, element_name, automation_id (optional), text"
+        Handler = {
+            param($params)
+            Invoke-UIAutomationType -WindowTitle $params.window_title -ElementName ($params.element_name ?? "") -AutomationId ($params.automation_id ?? "") -Text $params.text
+        }
+    }
 }
 
 # ============================================================
@@ -496,6 +526,67 @@ function Get-ToolDefinitions {
                         name = @{ type = "string"; description = "The full name or last name to resolve" }
                     }
                     required = @("name")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "uia_launch"
+                description = "Launch an application (Paint, Notepad, Edge, SnippingTool, FileExplorer, etc) from an executable path."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        app_path = @{ type = "string"; description = "Path or name of the application, e.g. 'notepad.exe', 'mspaint.exe', 'explorer.exe'" }
+                    }
+                    required = @("app_path")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "uia_inspect"
+                description = "Inspect a window's layout and controls. Gives a tree of buttons, text fields, tabs, and their Automation IDs. You MUST run this before you click or type anything to find the correct element."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        window_title = @{ type = "string"; description = "Partial title of the window" }
+                    }
+                    required = @("window_title")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "uia_click"
+                description = "Click a UI element in a window using .NET UI Automation."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        window_title  = @{ type = "string"; description = "Partial title of the window" }
+                        element_name  = @{ type = "string"; description = "The exact Name of the element (optional if id is provided)" }
+                        automation_id = @{ type = "string"; description = "The AutomationId of the element (optional if name is provided)" }
+                    }
+                    required = @("window_title")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "uia_type"
+                description = "Type text into a specific UI element using .NET UI Automation."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        window_title  = @{ type = "string"; description = "Partial title of the window" }
+                        element_name  = @{ type = "string"; description = "The exact Name of the element (optional if id is provided)" }
+                        automation_id = @{ type = "string"; description = "The AutomationId of the element (optional if name is provided)" }
+                        text          = @{ type = "string"; description = "The text to securely type" }
+                    }
+                    required = @("window_title", "text")
                 }
             }
         }

@@ -1,6 +1,6 @@
 $script:TOOL_SYSTEM = @"
 IDENTITY:
-You are AIRI — Automated Intelligence Remote Interface.
+You are AIRWAV — Automated Intelligence Remote Interface.
 You are powered by Gemini 2.5 Flash, running LOCALLY on the user's Windows workstation.
 You have direct access to: Outlook, Word, Excel, PowerPoint, Jabber, Chrome, Edge, Firefox, Local filesystem, Outlook Calendar.
 
@@ -10,17 +10,18 @@ CRITICAL RULES:
 3. OUTPUT FORMAT (use ONLY ONE tag per action type):
    - PowerPoint (new/update): <SLIDES>[{"title": "t", "content": "c"}]</SLIDES>
    - Jabber:    <JABBER>{"recipient": "user", "message": "text"}</JABBER>
-   - Email:     <EMAIL>{"to": "name", "subject": "subj", "body": "txt", "action": "draft", "attachments": []}</EMAIL>
-   - Word doc:  <WORD>{"path": "Documents/file.docx", "title": "t", "body": "content", "action": "create"}</WORD>
+   - Email:     <EMAIL>{"action": "draft|reply|forward|delete|flag", "to": "name", "subject": "subj", "body": "txt", "query": "email to reply/fwd/del", "attachments": []}</EMAIL>
+   - Word doc:  <WORD>{"action": "create|open|append|replace", "path": "file.docx", "title": "t", "body": "content", "search": "old", "replace": "new"}</WORD>
+   - Excel:     <EXCEL>{"action": "read|create|write", "path": "file.xlsx", "cell": "B2", "value": "100"}</EXCEL>
    - Browser:   <BROWSER>{"url": "https://...", "browser": "chrome|edge|firefox"}</BROWSER>
    - Search:    <BROWSER>{"search": "query text", "engine": "google|bing", "browser": ""}</BROWSER>
-   - Calendar:  <CALENDAR>{"action": "create", "subject": "t", "start": "2026-04-17 14:00", "end": "2026-04-17 15:00", "location": "", "body": "", "attendees": []}</CALENDAR>
-   - Read Cal:  <CALENDAR>{"action": "read", "days": 7}</CALENDAR>
+   - Calendar:  <CALENDAR>{"action": "create|read|delete", "subject": "matching subj", "start": "2026-04-17 14:00", "end": "2026-04-17 15:00", "location": "", "body": "", "attendees": []}</CALENDAR>
    - Open file: <OPEN>{"path": "Documents/file.ext"}</OPEN>
+   - UI Task:   <UIAUTOMATION>{"action": "launch|inspect|click|type", "path": "notepad.exe", "window": "Notepad", "element_name": "File", "id": "12", "text": "hello"}</UIAUTOMATION>
 4. For email body text, keep it on ONE line using \n for line breaks. Do NOT use smart quotes or markdown in JSON values.
    IMPORTANT: In ALL JSON path values, use FORWARD SLASHES only (e.g. "Documents/Report.docx"). Do NOT use backslashes. Use relative paths like "Desktop/file.docx" or "Documents/file.docx" — the engine resolves them automatically.
 5. Multiple email recipients: put them ALL in the "to" field separated by commas, e.g. "to": "Sam Price, Demetra Drizis". Never split them into separate EMAIL tags.
-6. When you create a PowerPoint and then email it, set "attachments": ["AIRI_Presentation.pptx"] — the engine will resolve the real path automatically.
+6. When you create a PowerPoint and then email it, set "attachments": ["AIRWAV_Presentation.pptx"] — the engine will resolve the real path automatically.
 7. EMAIL action is ALWAYS "draft" — never "send". The user reviews and sends from Outlook themselves. Do not say you sent an email.
 
 User paths: Desktop=$($script:ENV_PATHS.Desktop) Downloads=$($script:ENV_PATHS.Downloads) Documents=$($script:ENV_PATHS.Documents)
@@ -183,7 +184,7 @@ function Invoke-PostFlight {
     # ── 2a. PowerPoint ───────────────────────────────────────────────────────
     if ($ResponseText -match '<SLIDES>([\s\S]*?)</SLIDES>') {
         $slidesRaw = $Matches[1].Trim()
-        $savePath = Join-Path $script:ENV_PATHS.Desktop "AIRI_Presentation.pptx"
+        $savePath = Join-Path $script:ENV_PATHS.Desktop "AIRWAV_Presentation.pptx"
         Write-Host "  Generate PPTX? [Y/N]: " -NoNewline -ForegroundColor Yellow
         if ((Read-Host) -match '^[Yy]') {
             $pptResult = Invoke-PowerPointCreate -FilePath $savePath -SlidesJson $slidesRaw
@@ -202,7 +203,7 @@ function Invoke-PostFlight {
         try {
             $obj = ConvertFrom-LlmJson -Raw $wordRaw
             # Resolve relative / forward-slash paths from the model
-            $docPath = if ($obj.path) { $obj.path } else { "Desktop/AIRI_Document.docx" }
+            $docPath = if ($obj.path) { $obj.path } else { "Desktop/AIRWAV_Document.docx" }
             $docPath = $docPath -replace '/', '\'
             if ($docPath -match '^(?i)(Desktop|Documents|Downloads)[\\\/]') {
                 $docPath = $docPath -replace '(?i)^Desktop',   $script:ENV_PATHS.Desktop `
@@ -218,6 +219,8 @@ function Invoke-PostFlight {
                     $actionsRun += Invoke-WordOpenDocument -FilePath $docPath
                 } elseif ($action -eq "append") {
                     $actionsRun += Invoke-WordAppendText -FilePath $docPath -Text $obj.body
+                } elseif ($action -eq "replace") {
+                    $actionsRun += Invoke-WordReplaceText -FilePath $docPath -SearchText $obj.search -ReplaceText $obj.replace
                 } else {
                     $result = Invoke-WordCreateDocument -FilePath $docPath -Title $obj.title -Body $obj.body -Display
                     $actionsRun += $result
@@ -229,18 +232,53 @@ function Invoke-PostFlight {
             }
         } catch { Write-StatusLine "ERR" "Word JSON parse failed: $_" }
     }
+    
+    # ── 2c. Excel ────────────────────────────────────────────────────────────
+    if ($ResponseText -match '<EXCEL>([\s\S]*?)</EXCEL>') {
+        $excelRaw = $Matches[1]
+        try {
+            $obj = ConvertFrom-LlmJson -Raw $excelRaw
+            $exPath = $obj.path -replace '/', '\'
+            if ($exPath -match '^(?i)(Desktop|Documents|Downloads)[\\\/]') {
+                $exPath = $exPath -replace '(?i)^Desktop', $script:ENV_PATHS.Desktop -replace '(?i)^Documents', $script:ENV_PATHS.Documents -replace '(?i)^Downloads', $script:ENV_PATHS.Downloads
+            } elseif ($exPath -notmatch '^[A-Za-z]:\\' -and $exPath -notmatch '^\\\\') { $exPath = Join-Path $script:ENV_PATHS.Desktop $exPath }
+            
+            $action = if ($obj.action) { $obj.action } else { "read" }
+            Write-Host "  $action Excel file at $exPath? [Y/N]: " -NoNewline -ForegroundColor Yellow
+            if ((Read-Host) -match '^[Yy]') {
+                if ($action -eq "write") {
+                    $actionsRun += Invoke-ExcelWriteCell -FilePath $exPath -Cell $obj.cell -Value $obj.value
+                }
+            }
+        } catch { Write-StatusLine "ERR" "Excel JSON parse failed: $_" }
+    }
 
     # ── 3. Email (LAST of the file-dependent actions) ────────────────────────
     if ($ResponseText -match '<EMAIL>([\s\S]*?)</EMAIL>') {
         $emailRaw = $Matches[1]
         try {
             $obj = ConvertFrom-LlmJson -Raw $emailRaw
-            if ($obj.to -or $obj.subject) {
-                $attachList = @()
-                if ($obj.attachments) { $attachList = Resolve-Attachments -Attachments @($obj.attachments) }
-                Write-Host "  Draft email to $($obj.to)? [Y/N]: " -NoNewline -ForegroundColor Yellow
-                if ((Read-Host) -match '^[Yy]') {
-                    $actionsRun += Invoke-OutlookDraftEmail -To $obj.to -Subject $obj.subject -Body $obj.body -Attachments $attachList
+            $emailAction = if ($obj.action) { $obj.action } else { "draft" }
+            if ($emailAction -eq "reply") {
+                Write-Host "  Reply to '$($obj.query)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                if ((Read-Host) -match '^[Yy]') { $actionsRun += Invoke-OutlookReplyEmail -Query $obj.query -Body $obj.body }
+            } elseif ($emailAction -eq "forward") {
+                Write-Host "  Forward '$($obj.query)' to '$($obj.to)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                if ((Read-Host) -match '^[Yy]') { $actionsRun += Invoke-OutlookForwardEmail -Query $obj.query -To $obj.to -Body $obj.body }
+            } elseif ($emailAction -eq "delete") {
+               Write-Host "  Delete email '$($obj.query)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+               if ((Read-Host) -match '^[Yy]') { $actionsRun += Invoke-OutlookDeleteEmail -Query $obj.query }
+            } elseif ($emailAction -eq "flag") {
+               Write-Host "  Flag email '$($obj.query)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+               if ((Read-Host) -match '^[Yy]') { $actionsRun += Invoke-OutlookFlagEmail -Query $obj.query }
+            } else {
+                if ($obj.to -or $obj.subject) {
+                    $attachList = @()
+                    if ($obj.attachments) { $attachList = Resolve-Attachments -Attachments @($obj.attachments) }
+                    Write-Host "  Draft email to $($obj.to)? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                    if ((Read-Host) -match '^[Yy]') {
+                        $actionsRun += Invoke-OutlookDraftEmail -To $obj.to -Subject $obj.subject -Body $obj.body -Attachments $attachList
+                    }
                 }
             }
         } catch { 
@@ -270,6 +308,9 @@ function Invoke-PostFlight {
             if ($calAction -eq "read") {
                 $days = if ($obj.days) { [int]$obj.days } else { 7 }
                 $actionsRun += Invoke-OutlookReadCalendar -DaysAhead $days
+            } elseif ($calAction -eq "delete") {
+                Write-Host "  Delete appointment '$($obj.subject)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                if ((Read-Host) -match '^[Yy]') { $actionsRun += Invoke-OutlookDeleteAppointment -Subject $obj.subject }
             } else {
                 $attendees = if ($obj.attendees) { @($obj.attendees) } else { @() }
                 if ($attendees.Count -gt 0) {
@@ -295,13 +336,42 @@ function Invoke-PostFlight {
         try {
             $obj = ConvertFrom-LlmJson -Raw $openRaw
             if ($obj.path -and (Test-Path $obj.path)) {
-                Write-Host "  Open '$($obj.path)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
-                if ((Read-Host) -match '^[Yy]') {
-                    Start-Process $obj.path
-                    $actionsRun += "Opened: $($obj.path)"
+                $ext = [System.IO.Path]::GetExtension($obj.path).ToLower()
+                $safeExts = @(".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".csv", ".md", ".jpg", ".png")
+                
+                if ($ext -notin $safeExts) {
+                    Write-StatusLine "ERR" "SECURITY VIOLATION: Cannot autonomously open potentially dangerous file extension '$ext'."
+                } else {
+                    Write-Host "  Open '$($obj.path)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                    if ((Read-Host) -match '^[Yy]') {
+                        Start-Process $obj.path
+                        $actionsRun += "Opened: $($obj.path)"
+                    }
                 }
             }
         } catch { Write-StatusLine "ERR" "Open JSON parse failed: $_" }
+    }
+
+    # ── 7. UI Automation ─────────────────────────────────────────────────────
+    if ($ResponseText -match '<UIAUTOMATION>([\s\S]*?)</UIAUTOMATION>') {
+        $uiaRaw = $Matches[1]
+        try {
+            $obj = ConvertFrom-LlmJson -Raw $uiaRaw
+            $uiaAction = if ($obj.action) { $obj.action } else { "inspect" }
+            if ($uiaAction -eq "launch") {
+                Write-Host "  Launch '$($obj.path)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                if ((Read-Host) -match '^[Yy]') { $actionsRun += Invoke-UIAutomationLaunch -AppPath $obj.path }
+            } elseif ($uiaAction -eq "inspect") {
+                Write-Host "  Inspect UI of '$($obj.window)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                if ((Read-Host) -match '^[Yy]') { $actionsRun += Invoke-UIAutomationInspect -WindowTitle $obj.window }
+            } elseif ($uiaAction -eq "click") {
+                Write-Host "  Click element '$($obj.element_name)' in '$($obj.window)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                if ((Read-Host) -match '^[Yy]') { $actionsRun += Invoke-UIAutomationClick -WindowTitle $obj.window -ElementName $obj.element_name -AutomationId $obj.id }
+            } elseif ($uiaAction -eq "type") {
+                Write-Host "  Type text into '$($obj.element_name)' in '$($obj.window)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                if ((Read-Host) -match '^[Yy]') { $actionsRun += Invoke-UIAutomationType -WindowTitle $obj.window -ElementName $obj.element_name -AutomationId $obj.id -Text $obj.text }
+            }
+        } catch { Write-StatusLine "ERR" "UIA JSON parse failed: $_" }
     }
 
     return $actionsRun

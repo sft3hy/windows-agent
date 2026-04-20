@@ -7,6 +7,15 @@ function Invoke-ReadFile {
     Write-ToolLine "File" "Reading file" $FilePath
     try {
         if (-not (Test-Path $FilePath)) { return "ERROR: File not found: $FilePath" }
+        
+        # Security Sandbox: Ensure file exists inside User Profile
+        # Prevents directory traversal like "C:\Windows\System32"
+        $resolvedPath = (Resolve-Path $FilePath).Path
+        if (-not $resolvedPath.StartsWith($env:USERPROFILE, [System.StringComparison]::InvariantCultureIgnoreCase)) {
+            Write-StatusLine "ERR" "SECURITY VIOLATION: Path traversal detected. Access denied outside User Profile."
+            return "ERROR: Access Denied. Cannot read files outside of designated user space."
+        }
+
         $ext = [System.IO.Path]::GetExtension($FilePath).ToLower()
 
         if ($ext -eq ".pdf") {

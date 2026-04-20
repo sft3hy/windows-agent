@@ -4,7 +4,7 @@ $script:CONFIG = @{
     Model        = "gemini-2.5-pro"
     MaxTokens    = 4096
     Temperature  = 0.3
-    AgentName    = "AIRI"
+    AgentName    = "AIRWAV"
     Version      = "1.0.0"
 }
 
