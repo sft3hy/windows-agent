@@ -1,6 +1,6 @@
-# AIRWAV (Automated Intelligence Remote Interface)
+# AIRWAV (AI Runtime for Windows Agentic Vision)
 
-AIRWAV is an advanced, production-hardened local agent built entirely around Windows PowerShell and `.NET Interop`. By leveraging Google's Gemini 2.5 Flash on the backend and native COM objects on the client side, AIRWAV transforms plain-English prompts into automated visual and programmatic workflows across the Windows ecosystem.
+AIRWAV is an advanced, production-hardened local agent built entirely around Windows PowerShell and `.NET Interop`. By leveraging Google's Gemini 3.1 Pro Preview on the backend and native COM objects on the client side, AIRWAV transforms plain-English prompts into automated visual and programmatic workflows across the Windows ecosystem.
 
 Designed explicitly for high-security and restricted networks (such as government or heavily compliant enterprise infrastructures), AIRWAV operates with absolute local proxying. No sensitive proprietary files are uploaded to external training APIs; data is extracted locally via invisible background processes and injected tightly into the LLM context envelope.
 
@@ -8,11 +8,11 @@ Designed explicitly for high-security and restricted networks (such as governmen
 
 ## 💻 Example Commands
 You can ask AIRWAV to perform highly complex and chained workflows natively across Windows. Here are a few examples of what you can type intuitively into the prompt:
+- *"Research the latest MSFT stock price on DuckDuckGo, save the summary into a new Word document named `StockReport.docx`, and draft an email to the Finance team with that document attached."*
 - *"Read the `Q3_Financials.pdf` on my Desktop and generate a 5-slide PowerPoint summarizing the revenue points."*
-- *"Search for recent news on 'Global Terrorism' on Google, read the first two links, and draft an email to John Smith summarizing the articles."*
-- *"Find my upcoming 'Strategy Sync' calendar block and delete it."*
 - *"Look up the email from 'Demetra' regarding server patches, and forward it to Sam with the note: 'Please review these patches'."*
 - *"Open `budget.xlsx`, replace the value in cell C12 with `50000`, and then message Mike on Jabber to let him know it's updated."*
+- *"Find all meetings on my calendar for the next 7 days and create a summary in a new Word document."*
 - *"Launch MS Paint and draw a simple square using UI Automation."*
 - *"Replace the text '[ADDRESS]' with '123 Fake St' inside my `InvoiceTemplate.docx` document."*
 
@@ -22,6 +22,8 @@ You can ask AIRWAV to perform highly complex and chained workflows natively acro
 
 Unlike other agents that rely on brittle web-scrapers or simulated environments, AIRWAV interfaces directly with the native layer of your OS:
 
+- **Autonomous Agentic Loop:** The engine executes in a continuous feedback loop, allowing the LLM to autonomously chain multiple tools, observe their execution results, and iteratively solve complex multi-step tasks until it explicitly outputs a `<DONE>` completion tag.
+- **Rich Terminal UI:** Utilizes multithreaded Runspaces for a non-blocking, animated startup experience and rich ANSI-colored console feedback for tool execution and status reporting.
 - **Background COM Layer:** Precisely reads, creates, and inherently manipulates `Word`, `Excel`, `PowerPoint`, and `Outlook` files entirely invisibly without seizing mouse/keyboard control.
 - **Foreground UI Automation Layer:** Uses native `.NET System.Windows.Automation` to visually inspect, map out, and click actual buttons on Graphical User Interfaces (e.g. MS Paint, Notepad, File Explorer).
 
@@ -29,15 +31,23 @@ Unlike other agents that rely on brittle web-scrapers or simulated environments,
 
 ## 🚀 Capabilities & Example Use Cases
 
-### 📧 Mail & Calendar Operations (Outlook Integration)
-The agent integrates seamlessly with your local Outlook installation, communicating securely via the Exchange Global Address List (GAL).
+### 📧 Communication & Collaboration (Outlook & Jabber)
+AIRWAV manages your workspace interactions by securely resolving identities and automating messages.
 
-*   **Intelligent Drafting & Sending**
-    > *"Draft an email to Sam with the weekly review notes attached."*
-*   **Deep State Manipulation (Reply/Forward/Delete)**
-    > *"Search my inbox for the email titled 'Server Migration' and reply that we are good to go."*
-*   **Calendar Management**
-    > *"Find my upcoming 'Sync' appointment and delete it from my calendar."*
+*   **Hardened Contact Resolution (AD/LDAP)**
+    Resolves names to SMTP addresses via high-performance Active Directory queries, bypassing aggressive COM/OOM security blocks to guarantee draft pre-filling.
+*   **Intelligent Mail & Calendar**
+    Drafts, replies, forwards, and deletes emails. Manages calendar appointments and meetings across your local Outlook instance.
+*   **Instant Messaging (Jabber)**
+    Sends targeted Cisco Jabber messages to recipients or opens chat windows for immediate collaboration.
+
+### 🔍 Autonomous Research & Data Extraction
+The agent can think through data discovery and extraction workflows independently.
+
+*   **Intelligent Web Research**
+    Performs searches (Google, Bing, DuckDuckGo) and fetches link content directly to build its own knowledge base before taking action.
+*   **Native PDF & Document Reading**
+    Extracts text from `PDF`, `DOCX`, and `PPTX` files using either invisible Word COM conversion or raw binary stream markers for reliable parsing in air-gapped environments.
 
 ### 📝 Office Automation (Word, Excel, PowerPoint)
 Create, dissect, or surgically edit documents without opening menus.
@@ -99,7 +109,7 @@ Every single destructive operation (Deleting an Email, Cancelling a Meeting, Lau
 
 ### `src/Core/` (Orchestration & Logic)
 This directory manages AI interaction, state management, and file ingestion.
-- **`MainLoop.ps1`**: Orchestrates the conversation thread, handles the UI prompts, calls the PreFlight hook, requests data from the Gemini API, displays agent responses, and triggers the PostFlight action execution.
+- **`MainLoop.ps1`**: Orchestrates the autonomous conversation thread. Implements a continuous feedback loop that feeds `Invoke-PostFlight` tool results back to the Gemini API, allowing the agent to chain multi-step actions dynamically until it determines the request is complete.
 - **`Api.ps1`**: Implements `Invoke-GeminiAPI`. Responsible for building the API payload, resolving the chat stream, injecting the system prompt securely, and performing the REST call to the LLM backend.
 - **`Engine.ps1`**: Contains logic for context enrichment and post-generation execution. Includes the main `TOOL_SYSTEM` prompt, dynamic regex-based file path extraction, robust unmarshaling logic for LLM-escaped JSON (`ConvertFrom-LlmJson`), file discovery algorithms, and the `Invoke-PostFlight` workflow processing (sequencing Browser -> File Creation -> Email integration).
 - **`Dispatcher.ps1`**: Maintains a structured dispatch table containing OpenAPI-style schemas for native function calling. Maps specific function call intents (like `outlook_draft_email`, `jabber_send_message`, `excel_create`) directly to native PowerShell commands. 
@@ -107,7 +117,7 @@ This directory manages AI interaction, state management, and file ingestion.
 ### `src/Tools/` (Local Desktop Automation)
 Contains modular components leveraging Native APIs, system processing, and COM objects to automate Windows tasks. 
 - **`FileSystem.ps1`**: Handles intelligent document text extraction (`Invoke-ReadFile`). It uses COM wrappers inside isolated background runspaces for `DOCX` and `PPTX` parsing and employs advanced brute-force binary stripping + regex matching for extracting readable text from `PDF` binaries without third-party dependencies. Implements `Resolve-FuzzyFilePath`.
-- **`Outlook.ps1`**: Extensive integration with Outlook via COM automation to send emails, manage drafts, and resolve contacts against Global Address Lists + local address books. Implements robust name variance generation and Exchange DN tracking via `Add-MailRecipients`.
+- **`Outlook.ps1`**: Extensive integration with Outlook via COM automation to send emails and manage drafts. Resolves contacts securely via high-performance Active Directory (LDAP) queries to bypass aggressive COM Object Model security blocks, automatically injecting raw SMTP addresses to guarantee draft UI pre-filling.
 - **`Word.ps1`**: Creates, opens, modifies, and appends data directly into Microsoft Word instances (`.docx`) using Word COM automation.
 - **`Excel.ps1`**: Interacts with Microsoft Excel. Responsible for extracting data from Excel models, writing to specific cells, and creating new workbooks from structured data.
 - **`PowerPoint.ps1`**: Generates and manages PowerPoint presentations dynamically using the `PowerPoint.Application` COM interface. Supports creating multi-slide summaries from external data sources.

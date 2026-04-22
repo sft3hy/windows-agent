@@ -28,6 +28,20 @@ function Get-UIAWindow {
 }
 
 function Invoke-UIAutomationLaunch {
+    <#
+    .SYNOPSIS
+    Launch a local application for UI automation.
+
+    .DESCRIPTION
+    Starts an application from an absolute path if it is on the approved whitelist (e.g., notepad.exe, mspaint.exe). This prevents unauthorized execution of sensitive applications.
+
+    .PARAMETER AppPath
+    The absolute path or executable name of the application to launch.
+
+    .EXAMPLE
+    Invoke-UIAutomationLaunch -AppPath "notepad.exe"
+    Launches Notepad.
+    #>
     param([string]$AppPath)
     Write-ToolLine "UIAutomation" "Launching App" $AppPath
     try {        $appFilename = [System.IO.Path]::GetFileName($AppPath).ToLower()
@@ -48,6 +62,20 @@ function Invoke-UIAutomationLaunch {
 }
 
 function Invoke-UIAutomationInspect {
+    <#
+    .SYNOPSIS
+    Inspect the UI elements of a running application window.
+
+    .DESCRIPTION
+    Uses Microsoft UI Automation to traverse the element tree of a specified window. It returns a structural layout of controls, buttons, and text fields, which is essential for determining how to interact with the UI.
+
+    .PARAMETER WindowTitle
+    A partial or exact match for the window's title bar text.
+
+    .EXAMPLE
+    Invoke-UIAutomationInspect -WindowTitle "Notepad"
+    Returns the UI element tree for the Notepad window.
+    #>
     param([string]$WindowTitle)
     Write-ToolLine "UIAutomation" "Inspecting Window" $WindowTitle
     try {
@@ -77,6 +105,26 @@ function Invoke-UIAutomationInspect {
 }
 
 function Invoke-UIAutomationClick {
+    <#
+    .SYNOPSIS
+    Simulate a click on a UI element.
+
+    .DESCRIPTION
+    Finds a specific UI element within a window by its Name or AutomationId and invokes its default action (usually a click). If InvokePattern is not supported, it sets focus and simulates an ENTER keypress.
+
+    .PARAMETER WindowTitle
+    A partial or exact match for the target window's title.
+
+    .PARAMETER ElementName
+    The accessible name of the element to click (e.g., 'Save').
+
+    .PARAMETER AutomationId
+    Optional. The unique UIAutomation ID of the element, if known.
+
+    .EXAMPLE
+    Invoke-UIAutomationClick -WindowTitle "Notepad" -ElementName "Close"
+    Clicks the Close button in Notepad.
+    #>
     param([string]$WindowTitle, [string]$ElementName, [string]$AutomationId)
     Write-ToolLine "UIAutomation" "Clicking Element" "$ElementName / $AutomationId"
     try {
@@ -117,6 +165,29 @@ function Invoke-UIAutomationClick {
 }
 
 function Invoke-UIAutomationType {
+    <#
+    .SYNOPSIS
+    Simulate typing text into a UI element.
+
+    .DESCRIPTION
+    Finds a text input element within a window and injects the specified string. Attempts to use ValuePattern for direct injection; falls back to SendKeys if necessary.
+
+    .PARAMETER WindowTitle
+    A partial or exact match for the target window's title.
+
+    .PARAMETER ElementName
+    The accessible name of the target input field.
+
+    .PARAMETER AutomationId
+    Optional. The unique UIAutomation ID of the input field.
+
+    .PARAMETER Text
+    The string of text to type into the field.
+
+    .EXAMPLE
+    Invoke-UIAutomationType -WindowTitle "Notepad" -ElementName "Text Editor" -Text "Hello World"
+    Types 'Hello World' into the Notepad text area.
+    #>
     param([string]$WindowTitle, [string]$ElementName, [string]$AutomationId, [string]$Text)
     Write-ToolLine "UIAutomation" "Typing Text" "'$Text'"
     try {

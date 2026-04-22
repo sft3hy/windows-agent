@@ -8,7 +8,7 @@ function Get-ThinkingWord {
 }
 
 function Start-Spinner {
-    param([string]$Word = "Thinking")
+    param([string]$Word = (Get-ThinkingWord))
     $script:SpinnerShared = [hashtable]::Synchronized(@{ Running = $true })
     $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
     $rs.ApartmentState = "STA"; $rs.ThreadOptions = "ReuseThread"; $rs.Open()
@@ -18,11 +18,12 @@ function Start-Spinner {
     $ps = [System.Management.Automation.PowerShell]::Create()
     $ps.Runspace = $rs
     [void]$ps.AddScript({
-        $frames = @('|','/','-','\'); $colors = @(11, 13, 9, 3) # ConsoleColors
+        $frames = @('.', '..', '...', '....', '...', '..', '.')
         $i = 0; $label = "  $SpinWord "
         while ($Shared.Running) {
-            [Console]::ForegroundColor = $colors[$i % $colors.Count]
-            [Console]::Write("`r" + $label + $frames[$i % $frames.Count])
+            # Note: $colors should be defined; if not, we fallback to default
+            try { [Console]::ForegroundColor = [ConsoleColor]::Magenta } catch {}
+            [Console]::Write("`r" + $label + $frames[$i % $frames.Count].PadRight(5))
             [Console]::ResetColor(); $i++; [Threading.Thread]::Sleep(100)
         }
         [Console]::Write("`r" + (' ' * ($label.Length + 4)) + "`r")

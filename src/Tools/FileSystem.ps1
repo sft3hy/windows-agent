@@ -3,16 +3,46 @@
 # ============================================================
 
 function Invoke-ReadFile {
+    <#
+    .SYNOPSIS
+    Reads the content of various file types.
+
+    .DESCRIPTION
+    A universal file reader that securely extracts text from TXT, CSV, MD, JSON, XML, LOG, PDF, DOCX, PPTX, and XLSX files. Implements a security sandbox to prevent directory traversal attacks.
+
+    .PARAMETER FilePath
+    The absolute path to the file.
+
+    .EXAMPLE
+    Invoke-ReadFile -FilePath "C:\Users\John\Documents\Report.pdf"
+    Extracts text content from the PDF file.
+    #>
     param([string]$FilePath)
     Write-ToolLine "File" "Reading file" $FilePath
     try {
         if (-not (Test-Path $FilePath)) { return "ERROR: File not found: $FilePath" }
         
-        # Security Sandbox: Ensure file exists inside User Profile
-        # Prevents directory traversal like "C:\Windows\System32"
-        $resolvedPath = (Resolve-Path $FilePath).Path
-        if (-not $resolvedPath.StartsWith($env:USERPROFILE, [System.StringComparison]::InvariantCultureIgnoreCase)) {
-            Write-StatusLine "ERR" "SECURITY VIOLATION: Path traversal detected. Access denied outside User Profile."
+        # Security Sandbox: Ensure file exists inside User Profile, Temp, or known shell folders
+        # This handles Enterprise Folder Redirection where Documents might be on a UNC share (e.g. \\server\share)
+        $fullPath = [System.IO.Path]::GetFullPath($FilePath)
+        
+        $allowedRoots = @(
+            [System.IO.Path]::GetFullPath($env:USERPROFILE),
+            [System.IO.Path]::GetFullPath($env:TEMP),
+            [System.IO.Path]::GetFullPath([Environment]::GetFolderPath("MyDocuments")),
+            [System.IO.Path]::GetFullPath([Environment]::GetFolderPath("Desktop"))
+        ) | Select-Object -Unique
+
+        $isAllowed = $false
+        foreach ($root in $allowedRoots) {
+            if ($fullPath.StartsWith($root, [System.StringComparison]::InvariantCultureIgnoreCase)) {
+                $isAllowed = $true
+                break
+            }
+        }
+
+        if (-not $isAllowed) {
+            Write-StatusLine "ERR" "SECURITY VIOLATION: Access denied to $fullPath. Files must be within User Profile, Temp, or standard shell folders."
             return "ERROR: Access Denied. Cannot read files outside of designated user space."
         }
 
@@ -53,6 +83,14 @@ function Invoke-ReadFile {
             }
             return "ERROR: Could not read PPTX - PowerPoint COM unavailable or timed out"
 
+        } elseif ($ext -eq ".xlsx") {
+            $text = Invoke-ExcelReadFile -FilePath $FilePath -MaxRows 100
+            if ($text -and $text -notmatch '^ERROR:') {
+                Write-StatusLine "OK" "Read XLSX ($($text.Length) chars)"
+                return $text.Substring(0, [Math]::Min(8000, $text.Length))
+            }
+            return "ERROR: Could not read XLSX"
+
         } else {
             return "ERROR: Unsupported file type: $ext"
         }
@@ -65,6 +103,19 @@ function Invoke-ReadFile {
 
 # Run Word COM in a separate Runspace with a hard timeout
 function Invoke-WordExtract {
+    <#
+    .SYNOPSIS
+    Extracts text from Word documents using COM interop.
+
+    .DESCRIPTION
+    Spawns a hidden Word process in an STA thread to securely extract text from .docx or .pdf files. Enforces a strict timeout to prevent hung COM processes.
+
+    .PARAMETER Path
+    The absolute path to the document.
+
+    .PARAMETER TimeoutSeconds
+    The maximum time to wait for extraction before killing the Word process. Defaults to 30.
+    #>
     param([string]$Path, [int]$TimeoutSeconds = 30)
 
     $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
@@ -114,6 +165,19 @@ function Invoke-WordExtract {
 
 # Run PowerPoint COM in a separate Runspace with a hard timeout
 function Invoke-PowerPointExtract {
+    <#
+    .SYNOPSIS
+    Extracts text from PowerPoint presentations using COM interop.
+
+    .DESCRIPTION
+    Spawns a hidden PowerPoint process in an STA thread to extract text from all slides and shapes in a .pptx file. Enforces a strict timeout.
+
+    .PARAMETER Path
+    The absolute path to the presentation.
+
+    .PARAMETER TimeoutSeconds
+    The maximum time to wait for extraction. Defaults to 30.
+    #>
     param([string]$Path, [int]$TimeoutSeconds = 30)
 
     $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
@@ -168,6 +232,16 @@ function Invoke-PowerPointExtract {
 
 # Raw text extraction fallback — reads PDF binary and strips non-printable chars
 function Invoke-RawTextExtract {
+    <#
+    .SYNOPSIS
+    Fallback method to extract raw text from binary PDF files.
+
+    .DESCRIPTION
+    If Word COM fails, this function reads the raw binary of a PDF and uses regular expressions to extract printable text streams.
+
+    .PARAMETER Path
+    The absolute path to the file.
+    #>
     param([string]$Path)
     try {
         $bytes = [System.IO.File]::ReadAllBytes($Path)
@@ -195,6 +269,20 @@ function Invoke-RawTextExtract {
 
 # Brute-force file discovery in common shell folders
 function global:Resolve-FuzzyFilePath {
+    <#
+    .SYNOPSIS
+    Fuzzy-matches a filename against common user directories.
+
+    .DESCRIPTION
+    If a user asks to "read the sales report", this function searches the Desktop, Documents, Downloads, and OneDrive folders for any matching files with common extensions (.pdf, .docx, .xlsx, etc.).
+
+    .PARAMETER Name
+    The partial or exact filename to search for.
+
+    .EXAMPLE
+    Resolve-FuzzyFilePath -Name "QuarterlyEarnings"
+    Searches standard directories for QuarterlyEarnings.pdf, .xlsx, etc.
+    #>
     param([string]$Name)
     if ([string]::IsNullOrWhiteSpace($Name)) { return $null }
 

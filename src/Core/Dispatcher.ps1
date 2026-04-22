@@ -57,6 +57,64 @@ $script:TOOLS = @{
                 -SheetName ($params.sheet_name ?? "Sheet1")
         }
     }
+    "excel_get_metadata" = @{
+        Description = "Get structure, sheet names, and headers of an Excel file. Params: file_path(string)"
+        Handler = {
+            param($params)
+            Invoke-ExcelGetMetadata -FilePath $params.file_path
+        }
+    }
+    "excel_run_sql" = @{
+        Description = "Run SQL queries against an Excel file. Params: file_path, sql_query"
+        Handler = {
+            param($params)
+            Invoke-ExcelRunSQL -FilePath $params.file_path -SqlQuery $params.sql_query
+        }
+    }
+    "excel_remove_duplicates" = @{
+        Description = "Remove duplicate rows. Params: file_path, sheet_name, columns_to_check(int array)"
+        Handler = {
+            param($params)
+            $cols = if ($params.columns_to_check) { [int[]]$params.columns_to_check } else { @() }
+            Invoke-ExcelRemoveDuplicates -FilePath $params.file_path -SheetName ($params.sheet_name ?? "Sheet1") -ColumnsToCheck $cols
+        }
+    }
+    "excel_apply_color_scale" = @{
+        Description = "Apply heatmap or data bars. Params: file_path, sheet_name, column_letter, type(Heatmap|DataBar)"
+        Handler = {
+            param($params)
+            Invoke-ExcelApplyColorScale -FilePath $params.file_path -SheetName ($params.sheet_name ?? "Sheet1") -ColumnLetter $params.column_letter -Type ($params.type ?? "Heatmap")
+        }
+    }
+    "excel_beautify" = @{
+        Description = "Format a sheet with bold headers, autofit, and freeze panes. Params: file_path, sheet_name"
+        Handler = {
+            param($params)
+            Invoke-ExcelBeautify -FilePath $params.file_path -SheetName ($params.sheet_name ?? "Sheet1")
+        }
+    }
+    "excel_add_chart" = @{
+        Description = "Create a chart in Excel. Params: file_path, data_range, sheet_name, chart_type(Bar|Line|Pie), chart_title"
+        Handler = {
+            param($params)
+            Invoke-ExcelAddChart -FilePath $params.file_path -DataRange $params.data_range -SheetName ($params.sheet_name ?? "Sheet1") -ChartType ($params.chart_type ?? "Bar") -ChartTitle ($params.chart_title ?? "Data Chart")
+        }
+    }
+    "excel_csv_to_xlsx" = @{
+        Description = "Convert a CSV file to native XLSX. Params: csv_path, excel_path"
+        Handler = {
+            param($params)
+            Convert-CsvToExcel -CsvPath $params.csv_path -ExcelPath $params.excel_path
+        }
+    }
+    "excel_export_pdf" = @{
+        Description = "Export Excel to PDF. Params: file_path, pdf_path, sheet_name, entire_workbook(bool)"
+        Handler = {
+            param($params)
+            $entire = if ($null -ne $params.entire_workbook) { [bool]$params.entire_workbook } else { $false }
+            Invoke-ExcelExportPDF -FilePath $params.file_path -PdfPath $params.pdf_path -SheetName ($params.sheet_name ?? "Sheet1") -EntireWorkbook:$entire
+        }
+    }
     "powerpoint_create" = @{
         Description = "Create a PowerPoint presentation. Params: file_path(string), slides_json(JSON array of {title, content})"
         Handler = {
@@ -157,7 +215,7 @@ $script:TOOLS = @{
         }
     }
 
-    # --- BROWSER ---
+    # --- BROWSER / RESEARCH ---
     "browser_open_url" = @{
         Description = "Open a URL in the browser. Params: url, browser(chrome|edge|firefox)"
         Handler = {
@@ -165,11 +223,18 @@ $script:TOOLS = @{
             Invoke-BrowserOpen -Url $params.url -Browser ($params.browser ?? "")
         }
     }
-    "browser_search" = @{
-        Description = "Search the web. Params: query, engine(google|bing|duckduckgo), browser"
+    "web_search" = @{
+        Description = "Search the web and scrape results text. Params: query, top_n"
         Handler = {
             param($params)
-            Invoke-BrowserSearch -Query $params.query -Engine ($params.engine ?? "google") -Browser ($params.browser ?? "")
+            Invoke-WebSearch -Query $params.query -TopN ([int]($params.top_n ?? 3))
+        }
+    }
+    "web_fetch" = @{
+        Description = "Fetch and scrape a URL for text content. Params: url"
+        Handler = {
+            param($params)
+            Invoke-WebFetch -Url $params.url
         }
     }
 
@@ -327,6 +392,133 @@ function Get-ToolDefinitions {
                         sheet_name = @{ type = "string"; description = "Sheet name (default Sheet1)" }
                     }
                     required = @("file_path","data")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "excel_get_metadata"
+                description = "Instantly 'see' the structure, sheets, and headers of an Excel file."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        file_path = @{ type = "string"; description = "Absolute path to the Excel file" }
+                    }
+                    required = @("file_path")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "excel_run_sql"
+                description = "Run SQL queries (SELECT * FROM [Sheet1$]) directly against an Excel file. Extremely fast for large datasets."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        file_path = @{ type = "string"; description = "Absolute path to the Excel file" }
+                        sql_query = @{ type = "string"; description = "SQL query string, e.g., 'SELECT * FROM [Sheet1$] WHERE Amount > 1000'" }
+                    }
+                    required = @("file_path", "sql_query")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "excel_remove_duplicates"
+                description = "Remove duplicate rows from an Excel sheet based on specific columns."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        file_path = @{ type = "string"; description = "Absolute path" }
+                        sheet_name = @{ type = "string"; description = "Sheet name" }
+                        columns_to_check = @{ type = "array"; items = @{ type = "integer" }; description = "Array of column indices to check for duplicates (1-indexed)" }
+                    }
+                    required = @("file_path")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "excel_apply_color_scale"
+                description = "Apply a visual Heatmap or Data Bar to a column."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        file_path = @{ type = "string"; description = "Absolute path" }
+                        column_letter = @{ type = "string"; description = "Column letter to colorize (e.g., 'C')" }
+                        type = @{ type = "string"; enum = @("Heatmap", "DataBar"); description = "Type of formatting" }
+                        sheet_name = @{ type = "string"; description = "Sheet name" }
+                    }
+                    required = @("file_path", "column_letter")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "excel_beautify"
+                description = "Transform a raw data dump into a professional, formatted table (Bold headers, Autofit, Filters, Freeze panes)."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        file_path = @{ type = "string"; description = "Absolute path" }
+                        sheet_name = @{ type = "string"; description = "Sheet name" }
+                    }
+                    required = @("file_path")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "excel_add_chart"
+                description = "Generate a native Excel chart (Bar, Line, Pie)."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        file_path = @{ type = "string"; description = "Absolute path" }
+                        data_range = @{ type = "string"; description = "Range of data, e.g., 'A1:B10'" }
+                        chart_type = @{ type = "string"; enum = @("Bar", "Line", "Pie"); description = "Type of chart" }
+                        chart_title = @{ type = "string"; description = "Title of the chart" }
+                        sheet_name = @{ type = "string"; description = "Sheet name" }
+                    }
+                    required = @("file_path", "data_range")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "excel_csv_to_xlsx"
+                description = "Convert a raw CSV file into a native .xlsx Excel workbook."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        csv_path = @{ type = "string"; description = "Path to the input CSV" }
+                        excel_path = @{ type = "string"; description = "Path to save the output XLSX" }
+                    }
+                    required = @("csv_path", "excel_path")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "excel_export_pdf"
+                description = "Export an Excel sheet or the entire workbook to a PDF report."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        file_path = @{ type = "string"; description = "Path to the Excel file" }
+                        pdf_path = @{ type = "string"; description = "Path to save the PDF" }
+                        sheet_name = @{ type = "string"; description = "Specific sheet to export" }
+                        entire_workbook = @{ type = "boolean"; description = "Whether to export all sheets" }
+                    }
+                    required = @("file_path", "pdf_path")
                 }
             }
         },
@@ -502,16 +694,29 @@ function Get-ToolDefinitions {
         @{
             type = "function"
             function = @{
-                name = "browser_search"
-                description = "Perform a web search using Google, Bing, or DuckDuckGo."
+                name = "web_search"
+                description = "Perform a web search using Google and scrape text from the top results. Ideal for researching topics autonomously."
                 parameters = @{
                     type = "object"
                     properties = @{
-                        query   = @{ type = "string"; description = "Search terms" }
-                        engine  = @{ type = "string"; enum = @("google", "bing", "duckduckgo"); description = "Search engine (default Google)" }
-                        browser = @{ type = "string"; enum = @("chrome", "edge", "firefox"); description = "Preferred browser" }
+                        query = @{ type = "string"; description = "Search terms" }
+                        top_n = @{ type = "integer"; description = "Number of top results to extract (default 3)" }
                     }
                     required = @("query")
+                }
+            }
+        },
+        @{
+            type = "function"
+            function = @{
+                name = "web_fetch"
+                description = "Fetch URL text content directly (returns scraped text to you without opening a browser window)."
+                parameters = @{
+                    type = "object"
+                    properties = @{
+                        url = @{ type = "string"; description = "The URL to scrape" }
+                    }
+                    required = @("url")
                 }
             }
         },

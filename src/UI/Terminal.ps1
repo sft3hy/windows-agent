@@ -100,7 +100,7 @@ function Start-AnimatedBanner {
         $powered    = "          Powered by GenAI.mil $($Shared.Model)".PadRight(71)
         $airwavLine = "          AIRWAV — AI Runtime for Windows Automation & Vision".PadRight(71)
         
-        $amplitude = 0.7; $frequency = 0.3; $speed = 0.15; $frames = 150
+        $amplitude = 0.7; $frequency = 0.3; $speed = 0.15; $frames = 30
         $maxLen = 0; foreach ($line in $Shared.ASCII) { if ($line.Length -gt $maxLen) { $maxLen = $line.Length } }
 
         # Detect letter groups: contiguous non-space column runs
@@ -256,17 +256,115 @@ function Read-UserInput {
 }
 
 function Show-Help {
-    Write-Divider "EXAMPLE REQUESTS"
-    @(
-      "Read the PDF at C:\Reports\Q1.pdf and create a PowerPoint summary",
-      "Draft an email to the team about the project status",
-      "Create a Word document summarising today's key wins",
-      "Schedule a meeting with Sam Townsend tomorrow at 10am for 1 hour",
-      "What's on my calendar for the next 7 days?",
-      "Open https://news.google.com in Edge",
-      "Search DuckDuckGo for the latest AI news",
-      "Lookup the email address for 'John Smith'",
-      "Send a Jabber message to jane.doe saying 'See you at the meeting!'"
-    ) | ForEach-Object { Write-Host "  • " -NoNewline -ForegroundColor Yellow; Write-Host $_ -ForegroundColor White }
+    param([string]$Topic = "")
+    $Topic = $Topic.Trim()
+    
+    if (-not $Topic) {
+        Write-Divider "GENERAL HELP"
+        Write-Host "  Type 'help <topic>' for more details. Available topics:" -ForegroundColor White
+        Write-Host "  • Outlook / Email" -ForegroundColor Yellow
+        Write-Host "  • Excel" -ForegroundColor Yellow
+        Write-Host "  • Word" -ForegroundColor Yellow
+        Write-Host "  • PowerPoint" -ForegroundColor Yellow
+        Write-Host "  • FileSystem / PDF" -ForegroundColor Yellow
+        Write-Host "  • Web / Browser" -ForegroundColor Yellow
+        Write-Host "  • Calendar" -ForegroundColor Yellow
+        Write-Host "  • Jabber" -ForegroundColor Yellow
+        Write-Divider "QUICK EXAMPLES"
+        @(
+          "Read the PDF at C:\Reports\Q1.pdf and create a PowerPoint summary",
+          "Draft an email to the team about the project status",
+          "What's on my calendar for the next 7 days?"
+        ) | ForEach-Object { Write-Host "  • " -NoNewline -ForegroundColor Yellow; Write-Host $_ -ForegroundColor White }
+        Write-Divider
+        return
+    }
+
+    Write-Divider "HELP: $Topic"
+    switch -Regex ($Topic) {
+        "(?i)excel" {
+            Write-Host "  Excel Automation:" -ForegroundColor Cyan
+            Write-Host "  • Read/Write cells and ranges" -ForegroundColor White
+            Write-Host "  • Convert raw data or CSVs into new Workbooks" -ForegroundColor White
+            Write-Host "  • Apply heatmaps and beautify tables" -ForegroundColor White
+            Write-Host "  • Add Charts (Bar, Line, Pie)" -ForegroundColor White
+            Write-Host "  • Query data using SQL directly on sheets" -ForegroundColor White
+            Write-Host "  • Remove duplicates" -ForegroundColor White
+            Write-Host "  • Export whole workbooks to PDF" -ForegroundColor White
+            Write-Host "`n  Examples:" -ForegroundColor DarkGray
+            Write-Host "  > Please beautify the sales report at C:\Data.xlsx" -ForegroundColor Yellow
+            Write-Host "  > Query C:\Data.xlsx and tell me who has the most sales, then create a bar chart." -ForegroundColor Yellow
+            Write-Host "  > Export my excel file to a PDF." -ForegroundColor Yellow
+        }
+        "(?i)pdf|file" {
+            Write-Host "  FileSystem & PDF:" -ForegroundColor Cyan
+            Write-Host "  • Read text from local files (TXT, CSV, MD, JSON, LOG)" -ForegroundColor White
+            Write-Host "  • Extract text securely from PDFs and Word Documents" -ForegroundColor White
+            Write-Host "  • Find files on your Desktop or Documents without exact paths" -ForegroundColor White
+            Write-Host "`n  Examples:" -ForegroundColor DarkGray
+            Write-Host "  > Read the Q3 Report pdf from my documents and summarize it." -ForegroundColor Yellow
+            Write-Host "  > Can you read the system.log file on my desktop?" -ForegroundColor Yellow
+        }
+        "(?i)powerpoint|ppt" {
+            Write-Host "  PowerPoint Automation:" -ForegroundColor Cyan
+            Write-Host "  • Generate new slide decks from scratch" -ForegroundColor White
+            Write-Host "  • Open existing presentations" -ForegroundColor White
+            Write-Host "`n  Examples:" -ForegroundColor DarkGray
+            Write-Host "  > Read my Word doc and convert it into a 5-slide PowerPoint presentation." -ForegroundColor Yellow
+            Write-Host "  > Create a presentation about AI with 3 slides." -ForegroundColor Yellow
+        }
+        "(?i)outlook|email" {
+            Write-Host "  Outlook / Email:" -ForegroundColor Cyan
+            Write-Host "  • Read your Inbox or other folders" -ForegroundColor White
+            Write-Host "  • Send emails (with attachments and auto-resolving contacts)" -ForegroundColor White
+            Write-Host "  • Draft emails for review" -ForegroundColor White
+            Write-Host "  • Reply, Forward, Delete, or Flag specific emails" -ForegroundColor White
+            Write-Host "  • Lookup Active Directory contacts" -ForegroundColor White
+            Write-Host "`n  Examples:" -ForegroundColor DarkGray
+            Write-Host "  > Draft an email to Sam Townsend with the Q1 report attached." -ForegroundColor Yellow
+            Write-Host "  > Read my last 5 emails and reply to the one from the boss." -ForegroundColor Yellow
+            Write-Host "  > What is John Doe's email address?" -ForegroundColor Yellow
+        }
+        "(?i)word" {
+            Write-Host "  Word Document Automation:" -ForegroundColor Cyan
+            Write-Host "  • Create new documents with formatted titles and text" -ForegroundColor White
+            Write-Host "  • Append new text to existing documents" -ForegroundColor White
+            Write-Host "  • Perform global Find and Replace" -ForegroundColor White
+            Write-Host "  • Open documents for viewing" -ForegroundColor White
+            Write-Host "`n  Examples:" -ForegroundColor DarkGray
+            Write-Host "  > Draft a meeting agenda in Word and save it to my Desktop." -ForegroundColor Yellow
+            Write-Host "  > In my template.docx, replace [NAME] with Alice." -ForegroundColor Yellow
+        }
+        "(?i)web|browser" {
+            Write-Host "  Web & Browser Automation:" -ForegroundColor Cyan
+            Write-Host "  • Perform web research via search engines" -ForegroundColor White
+            Write-Host "  • Fetch and read text content directly from websites" -ForegroundColor White
+            Write-Host "  • Open URLs in Chrome or Edge" -ForegroundColor White
+            Write-Host "`n  Examples:" -ForegroundColor DarkGray
+            Write-Host "  > Research the latest news on SpaceX." -ForegroundColor Yellow
+            Write-Host "  > Go to https://docs.microsoft.com and summarize the page." -ForegroundColor Yellow
+            Write-Host "  > Open google.com in Chrome." -ForegroundColor Yellow
+        }
+        "(?i)calendar" {
+            Write-Host "  Calendar Automation:" -ForegroundColor Cyan
+            Write-Host "  • Read upcoming appointments and meetings" -ForegroundColor White
+            Write-Host "  • Schedule new calendar events" -ForegroundColor White
+            Write-Host "  • Delete existing meetings" -ForegroundColor White
+            Write-Host "`n  Examples:" -ForegroundColor DarkGray
+            Write-Host "  > What is on my calendar for today?" -ForegroundColor Yellow
+            Write-Host "  > Schedule a 1 hour sync with the engineering team for tomorrow at 2 PM." -ForegroundColor Yellow
+        }
+        "(?i)jabber" {
+            Write-Host "  Jabber Automation:" -ForegroundColor Cyan
+            Write-Host "  • Send instant messages" -ForegroundColor White
+            Write-Host "  • Open chat windows" -ForegroundColor White
+            Write-Host "`n  Examples:" -ForegroundColor DarkGray
+            Write-Host "  > Send a Jabber message to Sam saying 'Hello!'" -ForegroundColor Yellow
+        }
+        default {
+            Write-Host "  Unknown topic: $Topic" -ForegroundColor Red
+            Write-Host "  Try 'help' for a list of available topics." -ForegroundColor White
+        }
+    }
     Write-Divider
 }

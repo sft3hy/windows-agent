@@ -10,6 +10,20 @@ function Find-BrowserPath {
 
 # -----------  Chrome  -----------
 function Invoke-ChromeOpen {
+    <#
+    .SYNOPSIS
+    Open a URL in Google Chrome.
+
+    .DESCRIPTION
+    Launches Google Chrome and navigates to the specified URL. Searches standard installation paths to locate the executable.
+
+    .PARAMETER Url
+    The web address to open (e.g., 'https://www.google.com').
+
+    .EXAMPLE
+    Invoke-ChromeOpen -Url "https://www.example.com"
+    Opens example.com in Google Chrome.
+    #>
     param([string]$Url)
     Write-ToolLine "Chrome" "Opening URL" $Url
     try {
@@ -30,6 +44,20 @@ function Invoke-ChromeOpen {
 
 # -----------  Edge  -----------
 function Invoke-EdgeOpen {
+    <#
+    .SYNOPSIS
+    Open a URL in Microsoft Edge.
+
+    .DESCRIPTION
+    Launches Microsoft Edge and navigates to the specified URL. Searches standard installation paths to locate the executable.
+
+    .PARAMETER Url
+    The web address to open.
+
+    .EXAMPLE
+    Invoke-EdgeOpen -Url "https://www.example.com"
+    Opens example.com in Microsoft Edge.
+    #>
     param([string]$Url)
     Write-ToolLine "Edge" "Opening URL" $Url
     try {
@@ -50,6 +78,20 @@ function Invoke-EdgeOpen {
 
 # -----------  Firefox  -----------
 function Invoke-FirefoxOpen {
+    <#
+    .SYNOPSIS
+    Open a URL in Mozilla Firefox.
+
+    .DESCRIPTION
+    Launches Mozilla Firefox and navigates to the specified URL. Searches standard installation paths to locate the executable.
+
+    .PARAMETER Url
+    The web address to open.
+
+    .EXAMPLE
+    Invoke-FirefoxOpen -Url "https://www.example.com"
+    Opens example.com in Mozilla Firefox.
+    #>
     param([string]$Url)
     Write-ToolLine "Firefox" "Opening URL" $Url
     try {
@@ -71,6 +113,27 @@ function Invoke-FirefoxOpen {
 # -----------  Smart launcher  -----------
 # Tries Chrome → Edge → Firefox → Windows default
 function Invoke-BrowserOpen {
+    <#
+    .SYNOPSIS
+    Open a URL in a specified or automatically detected web browser.
+
+    .DESCRIPTION
+    Attempts to launch the URL in the specified browser. If no browser is specified, it will intelligently fallback through Chrome, Edge, and the system default browser.
+
+    .PARAMETER Url
+    The web address to navigate to.
+
+    .PARAMETER Browser
+    Optional. The preferred browser to use. Valid options: 'chrome', 'edge', 'firefox'.
+
+    .EXAMPLE
+    Invoke-BrowserOpen -Url "https://github.com"
+    Opens GitHub in the default detected browser (Chrome -> Edge -> System Default).
+
+    .EXAMPLE
+    Invoke-BrowserOpen -Url "https://github.com" -Browser "firefox"
+    Explicitly forces the URL to open in Mozilla Firefox.
+    #>
     param([string]$Url, [string]$Browser = "")
     Write-ToolLine "Browser" "Opening URL" $Url
 
@@ -103,6 +166,30 @@ function Invoke-BrowserOpen {
 # -----------  Search  -----------
 # Opens a web search in the preferred browser
 function Invoke-BrowserSearch {
+    <#
+    .SYNOPSIS
+    Perform a web search in the browser using the specified engine.
+
+    .DESCRIPTION
+    Constructs a valid search URL by encoding your query and launches it in a web browser. Supports Google, Bing, and DuckDuckGo.
+
+    .PARAMETER Query
+    The search terms to look up.
+
+    .PARAMETER Engine
+    Optional. The search engine to use. Valid options: 'google', 'bing', 'duckduckgo'. Default is 'google'.
+
+    .PARAMETER Browser
+    Optional. The preferred browser to use (e.g., 'chrome', 'edge').
+
+    .EXAMPLE
+    Invoke-BrowserSearch -Query "Powershell documentation"
+    Searches Google for 'Powershell documentation' using the default browser.
+
+    .EXAMPLE
+    Invoke-BrowserSearch -Query "Cybersecurity news" -Engine "duckduckgo" -Browser "firefox"
+    Searches DuckDuckGo using Firefox.
+    #>
     param(
         [string]$Query,
         [string]$Engine = "google",  # google | bing | duckduckgo

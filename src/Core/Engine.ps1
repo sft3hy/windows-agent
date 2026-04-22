@@ -7,17 +7,28 @@ You have direct access to: Outlook, Word, Excel, PowerPoint, Jabber, Chrome, Edg
 CRITICAL RULES:
 1. USE EXISTING FILES in priority. If a file is read into context (see FILE CONTENTS), use its content.
 2. DO NOT output <SLIDES> to recreate a file that already exists unless asked to MODIFY it.
-3. OUTPUT FORMAT (use ONLY ONE tag per action type):
+3. TOOL USAGE & FEEDBACK LOOP: 
+   - You operate in a continuous loop. You MUST use your automated tools (XML tags) to accomplish the user's request.
+   - The execution results of your tools will be returned to you in the next turn so you can see if they succeeded.
+   - You can chain multiple tool calls across turns to complete complex tasks.
+   - When the user's initial request has been FULLY completed, you MUST output the exact tag <DONE> to finish the loop.
+   - NEVER say you cannot do something or don't have tools. Just output the appropriate tool tag. Use ONLY ONE tag per action type:
    - PowerPoint (new/update): <SLIDES>[{"title": "t", "content": "c"}]</SLIDES>
    - Jabber:    <JABBER>{"recipient": "user", "message": "text"}</JABBER>
    - Email:     <EMAIL>{"action": "draft|reply|forward|delete|flag", "to": "name", "subject": "subj", "body": "txt", "query": "email to reply/fwd/del", "attachments": []}</EMAIL>
    - Word doc:  <WORD>{"action": "create|open|append|replace", "path": "file.docx", "title": "t", "body": "content", "search": "old", "replace": "new"}</WORD>
-   - Excel:     <EXCEL>{"action": "read|create|write", "path": "file.xlsx", "cell": "B2", "value": "100"}</EXCEL>
-   - Browser:   <BROWSER>{"url": "https://...", "browser": "chrome|edge|firefox"}</BROWSER>
-   - Search:    <BROWSER>{"search": "query text", "engine": "google|bing", "browser": ""}</BROWSER>
+    - Excel:     <EXCEL>{"action": "read|create|write|metadata|sql|clean|format|chart|pdf", "path": "file.xlsx", "sheet": "Sheet1", "query": "SELECT...", "cell": "A1", "value": "v", "range": "A1:B10", "type": "Heatmap|Bar", "title": "T", "out": "report.pdf"}</EXCEL>
+    - Excel SQL: Use "action": "sql" with "query": "SELECT * FROM [Sheet1$]" for high-speed data extraction.
+    - Excel Chart: Use "action": "chart" with "range": "A1:B10", "type": "Bar|Line|Pie", "title": "My Chart".
+    - Excel PDF: Use "action": "pdf" with "out": "path/to/report.pdf".
+    - Excel Format: Use "action": "format" to instantly beautify a raw sheet.
+   - Browser UI:<BROWSER>{"url": "https://...", "browser": "chrome|edge|firefox"}</BROWSER>
+   - Web search:<RESEARCH>{"search": "query text"}</RESEARCH> (Wait for results before doing other actions!)
+   - Web Fetch: <RESEARCH>{"url": "https://..."}</RESEARCH> (Wait for results before doing other actions!)
    - Calendar:  <CALENDAR>{"action": "create|read|delete", "subject": "matching subj", "start": "2026-04-17 14:00", "end": "2026-04-17 15:00", "location": "", "body": "", "attendees": []}</CALENDAR>
    - Open file: <OPEN>{"path": "Documents/file.ext"}</OPEN>
    - UI Task:   <UIAUTOMATION>{"action": "launch|inspect|click|type", "path": "notepad.exe", "window": "Notepad", "element_name": "File", "id": "12", "text": "hello"}</UIAUTOMATION>
+   - Done:      <DONE> (Output this ONLY when the entire user request is fulfilled)
 4. For email body text, keep it on ONE line using \n for line breaks. Do NOT use smart quotes or markdown in JSON values.
    IMPORTANT: In ALL JSON path values, use FORWARD SLASHES only (e.g. "Documents/Report.docx"). Do NOT use backslashes. Use relative paths like "Desktop/file.docx" or "Documents/file.docx" — the engine resolves them automatically.
 5. Multiple email recipients: put them ALL in the "to" field separated by commas, e.g. "to": "Sam Price, Demetra Drizis". Never split them into separate EMAIL tags.
@@ -158,13 +169,34 @@ function Invoke-PostFlight {
 
     # ═══════════════════════════════════════════════════════════════════════════
     # EXECUTION ORDER matters!  Dependencies flow left-to-right:
-    #   1. Browser/Search  (gather info)
+    #   1. Research/Browser  (gather info)
     #   2. PPTX / Word     (create files — may be attached later)
     #   3. Email           (draft with attachments that now exist on disk)
     #   4. Jabber / Calendar / Open  (independent actions)
     # ═══════════════════════════════════════════════════════════════════════════
 
-    # ── 1. Browser ───────────────────────────────────────────────────────────
+    # ── 1a. Web Research (Feeds back to AI) ──────────────────────────────────
+    if ($ResponseText -match '<RESEARCH>([\s\S]*?)</RESEARCH>') {
+        $researchRaw = $Matches[1]
+        try {
+            $obj = ConvertFrom-LlmJson -Raw $researchRaw
+            if ($obj.search) {
+                Write-Host "  Search web for '$($obj.search)' and read results? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                if ((Read-Host) -match '^[Yy]') { 
+                    $data = Invoke-WebSearch -Query $obj.search 
+                    $actionsRun += @{ type = "feed_back"; text = "WEB SEARCH RESULTS FOR '$($obj.search)':`n$data" }
+                }
+            } elseif ($obj.url) {
+                Write-Host "  Fetch and read URL '$($obj.url)'? [Y/N]: " -NoNewline -ForegroundColor Yellow
+                if ((Read-Host) -match '^[Yy]') { 
+                    $data = Invoke-WebFetch -Url $obj.url 
+                    $actionsRun += @{ type = "feed_back"; text = "WEB PAGE CONTENT FOR '$($obj.url)':`n$data" }
+                }
+            }
+        } catch { Write-StatusLine "ERR" "Research JSON parse failed: $_" }
+    }
+
+    # ── 1b. Browser UI ────────────────────────────────────────────────────────
     if ($ResponseText -match '<BROWSER>([\s\S]*?)</BROWSER>') {
         $browserRaw = $Matches[1]
         try {
@@ -248,6 +280,27 @@ function Invoke-PostFlight {
             if ((Read-Host) -match '^[Yy]') {
                 if ($action -eq "write") {
                     $actionsRun += Invoke-ExcelWriteCell -FilePath $exPath -Cell $obj.cell -Value $obj.value
+                } elseif ($action -eq "read") {
+                    $actionsRun += Invoke-ExcelReadFile -FilePath $exPath -SheetName $obj.sheet -MaxRows ([int]($obj.max ?? 100))
+                } elseif ($action -eq "create") {
+                    $actionsRun += Invoke-ExcelCreateFile -FilePath $exPath -Data $obj.data -SheetName $obj.sheet
+                } elseif ($action -eq "metadata") {
+                    $actionsRun += Invoke-ExcelGetMetadata -FilePath $exPath
+                } elseif ($action -eq "sql") {
+                    $actionsRun += Invoke-ExcelRunSQL -FilePath $exPath -SqlQuery $obj.query
+                } elseif ($action -eq "clean") {
+                    $actionsRun += Invoke-ExcelRemoveDuplicates -FilePath $exPath -SheetName $obj.sheet -ColumnsToCheck @($obj.cols ?? @())
+                } elseif ($action -eq "format") {
+                    $actionsRun += Invoke-ExcelBeautify -FilePath $exPath -SheetName $obj.sheet
+                } elseif ($action -eq "color") {
+                    $actionsRun += Invoke-ExcelApplyColorScale -FilePath $exPath -SheetName $obj.sheet -ColumnLetter $obj.cell -Type $obj.type
+                } elseif ($action -eq "chart") {
+                    $actionsRun += Invoke-ExcelAddChart -FilePath $exPath -DataRange $obj.range -SheetName $obj.sheet -ChartType $obj.type -ChartTitle $obj.title
+                } elseif ($action -eq "pdf") {
+                    $entire = if ($null -ne $obj.entire) { [bool]$obj.entire } else { $false }
+                    $actionsRun += Invoke-ExcelExportPDF -FilePath $exPath -PdfPath $obj.out -SheetName $obj.sheet -EntireWorkbook:$entire
+                } elseif ($action -eq "csv2xlsx") {
+                    $actionsRun += Convert-CsvToExcel -CsvPath $obj.csv -ExcelPath $exPath
                 }
             }
         } catch { Write-StatusLine "ERR" "Excel JSON parse failed: $_" }

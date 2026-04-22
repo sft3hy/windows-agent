@@ -1,11 +1,11 @@
 $script:CONFIG = @{
-    ApiKey       = $env:GEMINI_API_KEY  # or hardcode: "your-key-here"
-    ApiEndpoint  = "https://api.genai.mil/v1/chat/completions"
-    Model        = "gemini-2.5-pro"
-    MaxTokens    = 4096
-    Temperature  = 0.3
-    AgentName    = "AIRWAV"
-    Version      = "1.0.0"
+    ApiKey      = $env:GEMINI_API_KEY  # or hardcode: "your-key-here"
+    ApiEndpoint = "https://api.genai.mil/v1/chat/completions"
+    Model       = "gemini-3.1-pro-preview"
+    MaxTokens   = 4096
+    Temperature = 0.3
+    AgentName   = "AIRWAV"
+    Version     = "1.0.0"
 }
 
 # Resolve shell folders to real paths at startup

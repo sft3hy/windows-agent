@@ -3,6 +3,26 @@
 # ============================================================
 
 function Invoke-OutlookReadEmails {
+    <#
+    .SYNOPSIS
+    Reads recent emails from an Outlook folder.
+
+    .DESCRIPTION
+    Connects to the specified Outlook folder (Inbox by default) and retrieves the most recent emails, returning them as a JSON string. Can optionally filter by subject or sender.
+
+    .PARAMETER Count
+    The maximum number of emails to retrieve. Default is 10.
+
+    .PARAMETER Folder
+    The name of the folder to read from. Defaults to 'Inbox'.
+
+    .PARAMETER Filter
+    An optional search string to filter emails by Subject or SenderName.
+
+    .EXAMPLE
+    Invoke-OutlookReadEmails -Count 5 -Folder "Important"
+    Reads the 5 most recent emails from the 'Important' folder.
+    #>
     param([int]$Count = 10, [string]$Folder = "Inbox", [string]$Filter = "")
     Write-ToolLine "Outlook" "Reading emails" "$Folder (last $Count)"
     try {
@@ -120,7 +140,9 @@ function Get-NameVariants {
 }
 
 # Build all name orderings for a multi-part name + nickname expansions.
-# Returns: @("Price, Samuel", "Samuel Price", "Price Samuel", "Price, Sam", ...)
+# FIX: Full-name variations come FIRST; last-name-only is a LAST RESORT.
+# Previously, last-name-only was first in the list, causing the wrong person
+# to be matched whenever multiple contacts share a surname.
 function Get-AllNameVariations {
     param([string]$Name)
     $parts = $Name.Trim() -split '\s+'
@@ -129,132 +151,113 @@ function Get-AllNameVariations {
         $first = $parts[0]; $last = $parts[-1]
         $firstVariants = Get-NameVariants -First $first
         foreach ($fn in $firstVariants) {
-            $variations += "$last, $fn"    # GAL: Price, Samuel
+            $variations += "$last, $fn"    # GAL: Price, Samuel  (highest hit rate, full name)
             $variations += "$fn $last"     # Natural: Samuel Price
             $variations += "$last $fn"     # Reversed: Price Samuel
         }
-        if ($last.Length -gt 3) { $variations += $last }   # Last name only
-        $variations = $variations | Sort-Object -Unique
+        # Last-name-only goes at the END as a last resort — not first.
+        # Only attempt if the surname is long enough to be distinctive.
+        if ($last.Length -gt 4) { $variations += $last }
+        $variations = $variations | Select-Object -Unique
     } else {
         $variations += $Name
     }
     return $variations
 }
 
+# FIX: Validates that a resolved GAL entry actually belongs to the person
+# we searched for (by checking the last name appears in the resolved display name).
+# This prevents returning the wrong "Price" when the GAL resolves to a different one.
+function Test-ResolvedNameMatch {
+    param([string]$ResolvedDisplayName, [string]$RequestedLastName)
+    if (-not $RequestedLastName -or $RequestedLastName.Length -le 2) { return $true }
+    return $ResolvedDisplayName -match [regex]::Escape($RequestedLastName)
+}
+
 # ============================================================
 # CONTACT LOOKUP (informational — extracts email if possible)
 # ============================================================
 function Invoke-OutlookContactLookup {
+    <#
+    .SYNOPSIS
+    Look up a contact's email address using Active Directory.
+
+    .DESCRIPTION
+    Bypasses Outlook COM to perform a highly efficient LDAP query against Active Directory to resolve a person's name to an email address. Useful for finding colleagues in the Global Address List.
+
+    .PARAMETER Name
+    The partial or full name to search for (e.g., 'Sam Price' or 'Demetra').
+
+    .EXAMPLE
+    Invoke-OutlookContactLookup -Name "John Doe"
+    Returns the email address for John Doe if found in AD.
+    #>
     param([string]$Name)
     Write-ToolLine "Outlook" "Looking up contact" $Name
     try {
-        $outlook = New-Object -ComObject Outlook.Application
-        $ns = $outlook.GetNamespace("MAPI")
-
-        $variations = Get-AllNameVariations -Name $Name
-        $parts = $Name.Trim() -split '\s+'
-
-        Write-StatusLine "INFO" "Trying $($variations.Count) name variations for '$Name'"
-
-        # ── Pass 1: CreateRecipient + Resolve() ──────────────────────────
-        foreach ($v in $variations) {
-            try {
-                $recip = $ns.CreateRecipient($v)
-                if ($recip.Resolve()) {
-                    $email = $null
-                    # Method 1: ExchangeUser SMTP
-                    try { $email = $recip.AddressEntry.GetExchangeUser().PrimarySmtpAddress } catch {}
-                    # Method 2: PropertyAccessor for SMTP address
-                    if (-not $email -or $email -notmatch '@') {
-                        try {
-                            $PR_SMTP = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
-                            $email = $recip.AddressEntry.PropertyAccessor.GetProperty($PR_SMTP)
-                        } catch {}
-                    }
-                    # Method 3: Raw .Address (may be Exchange DN)
-                    if (-not $email -or $email -notmatch '@') {
-                        try { $email = $recip.AddressEntry.Address } catch {}
-                    }
-                    if ($email -and $email -match '@') {
-                        Write-StatusLine "OK" "GAL resolved '$v' → $email"
-                        return $email
-                    }
-                    # If Resolve() succeeded but we can't extract SMTP, return
-                    # the variation that resolved — the caller can use it with
-                    # Recipients.Add which will work since Outlook knows it.
-                    $resolvedName = try { $recip.AddressEntry.Name } catch { $v }
-                    Write-StatusLine "OK" "GAL resolved '$v' (Exchange DN — returning display name '$resolvedName')"
-                    return "RESOLVED:$resolvedName"
-                }
-            } catch {}
-        }
-
-        # ── Pass 2: Local Contacts folder ────────────────────────────────
-        try {
-            $contactsFolder = $ns.GetDefaultFolder(10)  # 10 = olFolderContacts
-            $contacts = $contactsFolder.Items
-            foreach ($v in $variations) {
-                $found = try { $contacts.Find("[FullName] = '$v'") } catch { $null }
-                if (-not $found -and $parts.Count -ge 2) {
-                    $found = try { $contacts.Find("[LastName] = '$($parts[-1])'") } catch { $null }
-                }
-                if (-not $found) {
-                    $escV = [regex]::Escape($v)
-                    $found = $contacts | Where-Object {
-                        ($_.FullName -match $escV) -or ($_.FileAs -match $escV)
-                    } | Select-Object -First 1
-                }
-                if ($found -and $found.Email1Address) {
-                    Write-StatusLine "OK" "Contacts folder: $($found.FullName) → $($found.Email1Address)"
-                    return $found.Email1Address
-                }
+        Write-StatusLine "INFO" "Attempting Active Directory (LDAP) search for '$Name'"
+        
+        # Bypass Outlook COM entirely and query AD
+        $domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()
+        if ($null -ne $domain) {
+            $searcher = [adsisearcher]""
+            $parts    = $Name.Trim() -split '\s+'
+            
+            $queries = @()
+            if ($parts.Count -ge 2) {
+                $f = $parts[0]
+                $l = $parts[-1]
+                # Priority 1: Last First (user requested this order)
+                # Priority 2: First Last
+                # Priority 3: DisplayName contains Last and First
+                # Priority 4: DisplayName contains First and Last
+                # Priority 5: Fallback to just Last Name
+                $queries += "(&(objectCategory=person)(objectClass=user)(anr=$l $f))"
+                $queries += "(&(objectCategory=person)(objectClass=user)(anr=$Name))"
+                $queries += "(&(objectCategory=person)(objectClass=user)(displayName=*$l*$f*))"
+                $queries += "(&(objectCategory=person)(objectClass=user)(displayName=*$f*$l*))"
+                $queries += "(&(objectCategory=person)(objectClass=user)(sn=$l))"
+            } else {
+                $queries += "(&(objectCategory=person)(objectClass=user)(|(anr=$Name)(givenName=$Name*)(sn=$Name*)(displayName=*$Name*)))"
             }
-        } catch {}
-
-        # ── Pass 3: Recent Emails (Inbox & Sent) ─────────────────────────
-        try {
-            Write-StatusLine "INFO" "Checking recent emails for '$Name'"
-            $inbox = $ns.GetDefaultFolder(6).Items
-            $sent  = $ns.GetDefaultFolder(5).Items
-            try { $inbox.Sort("[ReceivedTime]", $true); $sent.Sort("[SentOn]", $true) } catch {}
             
-            $lastName = if ($parts.Count -ge 2) { $parts[-1] } else { $Name }
+            $searcher.PropertiesToLoad.Add("displayname") | Out-Null
+            $searcher.PropertiesToLoad.Add("mail") | Out-Null
+            
+            $lastName = $parts[-1]
             $escLastName = '(?i)' + [regex]::Escape($lastName)
+            $escFirstName = if ($parts.Count -ge 2) { '(?i)' + [regex]::Escape($parts[0]) } else { "" }
             
-            for ($i = 1; $i -le 50; $i++) {
-                # Check Inbox (Senders)
-                if ($i -le $inbox.Count) {
-                    $item = try { $inbox.Item($i) } catch { $null }
-                    if ($item -and $item.SenderName -match $escLastName) {
-                        $email = try { $item.Sender.GetExchangeUser().PrimarySmtpAddress } catch { $null }
-                        if (-not $email -or $email -notmatch '@') { $email = try { $item.SenderEmailAddress } catch { "" } }
-                        if ($email -and $email -match '@') {
-                            Write-StatusLine "OK" "Recent emails (Inbox): $($item.SenderName) → $email"
+            $foundMatch = $false
+            foreach ($query in $queries) {
+                $searcher.Filter = $query
+                $results = $searcher.FindAll()
+                
+                foreach ($res in $results) {
+                    $prop = $res.Properties
+                    $email = if ($prop["mail"]) { $prop["mail"][0] } else { "" }
+                    $dispName = if ($prop["displayname"]) { $prop["displayname"][0] } else { "" }
+                    
+                    if ($email -and $email -match '@') {
+                        # Strict validation for broad queries (like sn=$l)
+                        if ($query -match "sn=" -and $parts.Count -ge 2) {
+                            if (-not ($dispName -match $escFirstName)) {
+                                continue # Skip if first name isn't in display name for fallback query
+                            }
+                        }
+                        
+                        if ($parts.Count -eq 1 -or $dispName -match $escLastName) {
+                            Write-StatusLine "OK" "AD search resolved '$Name' → $email"
                             return $email
                         }
                     }
                 }
-                # Check Sent Items (Recipients)
-                if ($i -le $sent.Count) {
-                    $item = try { $sent.Item($i) } catch { $null }
-                    if ($item) {
-                        $recips = try { $item.Recipients } catch { $null }
-                        if ($recips) {
-                            foreach ($r in $recips) {
-                                if ($r.Name -match $escLastName) {
-                                    $email = try { $r.AddressEntry.GetExchangeUser().PrimarySmtpAddress } catch { $null }
-                                    if (-not $email -or $email -notmatch '@') { $email = try { $r.Address } catch { "" } }
-                                    if ($email -and $email -match '@') {
-                                        Write-StatusLine "OK" "Recent emails (Sent): $($r.Name) → $email"
-                                        return $email
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
-        } catch { Write-StatusLine "WARN" "Recent emails search failed: $_" }
+            
+            Write-StatusLine "WARN" "AD found no exact match for '$Name'."
+        } else {
+            Write-StatusLine "WARN" "Not connected to an Active Directory domain."
+        }
 
         Write-StatusLine "WARN" "No contact found for: $Name"
         return $null
@@ -275,74 +278,98 @@ function Add-MailRecipients {
     param(
         [object]$Mail,
         [string]$To,
-        [int]$RecipientType = 1   # 1 = olTo, 2 = olCC, 3 = olBCC
+        [int]$RecipientType = 1
     )
 
-    # Tokenise: split on ", " | " and " | ";"
+    if ($null -eq $Mail) {
+        Write-StatusLine "WARN" "Add-MailRecipients: Invalid Mail object."
+        return
+    }
+
     $tokens = $To -split '\s*(?:,\s*|\s+and\s+|;\s*)\s*' | Where-Object { $_.Trim() -ne '' }
+    $resolvedList = @()
 
     foreach ($token in $tokens) {
         $token = $token.Trim()
         if (-not $token) { continue }
 
         try {
-            # If it's already an email, just add it directly
             if ($token -match '@') {
-                $r = $Mail.Recipients.Add($token)
-                $r.Type = $RecipientType
-                $r.Resolve() | Out-Null
+                $r = try { $Mail.Recipients.Add($token) } catch { $null }
+                if ($r) { 
+                    $r.Type = $RecipientType; try { $r.Resolve() | Out-Null } catch {} 
+                    $resolvedList += $token
+                }
                 Write-StatusLine "OK" "Added recipient: $token"
                 continue
             }
 
             Write-StatusLine "INFO" "Resolving recipient: '$token'"
+            $parts    = $token.Trim() -split '\s+'
+            $lastName = $parts[-1]
 
-            # First try: our contact lookup (which now returns RESOLVED:name for
-            # Exchange DN matches)
             $lookupResult = Invoke-OutlookContactLookup -Name $token
 
             if ($lookupResult -and $lookupResult -match '@') {
-                # Got a real SMTP email
-                $r = $Mail.Recipients.Add($lookupResult)
-                $r.Type = $RecipientType
-                $r.Resolve() | Out-Null
+                $r = try { $Mail.Recipients.Add($lookupResult) } catch { $null }
+                if ($r) { 
+                    $r.Type = $RecipientType; try { $r.Resolve() | Out-Null } catch {} 
+                    $resolvedList += $lookupResult
+                }
                 Write-StatusLine "OK" "Added resolved email: $lookupResult"
                 continue
             }
 
             if ($lookupResult -and $lookupResult -match '^RESOLVED:(.+)$') {
-                $resolvedName = $Matches[1] # Safe: match was on the line above
-                $r = $Mail.Recipients.Add($resolvedName)
-                $r.Type = $RecipientType
-                $r.Resolve() | Out-Null
-                Write-StatusLine "OK" "Added GAL-resolved name: $resolvedName"
-                continue
+                $resolvedName = $Matches[1]
+                if (-not (Test-ResolvedNameMatch -ResolvedDisplayName $resolvedName -RequestedLastName $lastName)) {
+                    Write-StatusLine "WARN" "RESOLVED name '$resolvedName' does not match requested '$lastName' — falling through to variation search"
+                } else {
+                    $r = try { $Mail.Recipients.Add($resolvedName) } catch { $null }
+                    if ($r) { 
+                        $r.Type = $RecipientType; try { $r.Resolve() | Out-Null } catch {} 
+                        $resolvedList += $resolvedName
+                    }
+                    Write-StatusLine "OK" "Added GAL-resolved name: $resolvedName"
+                    continue
+                }
             }
 
-            # Lookup completely failed — try Recipients.Add with each variation
-            # and see if Outlook can resolve any of them natively.
+            # Lookup failed or mismatch — try Recipients.Add with each variation directly.
             $variations = Get-AllNameVariations -Name $token
             $added = $false
 
             foreach ($v in $variations) {
-                # Outlook's Recipients.Add can sometimes throw if input is very weird
+                if (-not $v) { continue }
                 $r = try { $Mail.Recipients.Add($v) } catch { $null }
                 if ($r) {
                     $r.Type = $RecipientType
-                    if ($r.Resolve()) {
-                        Write-StatusLine "OK" "Recipients.Add resolved '$v'"
-                        $added = $true
-                        break
+                    $resolved = $false
+                    try { $resolved = $r.Resolve() } catch { $resolved = $false }
+
+                    if ($resolved) {
+                        $resolvedDisplayName = try { $r.AddressEntry.Name } catch { $v }
+                        if (Test-ResolvedNameMatch -ResolvedDisplayName $resolvedDisplayName -RequestedLastName $lastName) {
+                            Write-StatusLine "OK" "Recipients.Add resolved '$v' → '$resolvedDisplayName'"
+                            $resolvedList += $resolvedDisplayName
+                            $added = $true
+                            break
+                        } else {
+                            Write-StatusLine "WARN" "Recipients.Add resolved '$v' → '$resolvedDisplayName' but last name mismatch — skipping"
+                            try { $r.Delete() } catch {}
+                        }
                     } else {
-                        $r.Delete()      # Remove failed attempt
+                        try { $r.Delete() } catch {}
                     }
                 }
             }
 
             if (-not $added) {
-                # Last resort: add the original name as-is
-                $r = $Mail.Recipients.Add($token)
-                $r.Type = $RecipientType
+                $r = try { $Mail.Recipients.Add($token) } catch { $null }
+                if ($r) { 
+                    $r.Type = $RecipientType 
+                    $resolvedList += $token
+                }
                 Write-StatusLine "WARN" "Could not auto-resolve '$token' — added for manual review"
             }
         } catch {
@@ -350,8 +377,16 @@ function Add-MailRecipients {
         }
     }
 
-    # Final attempt to resolve any remaining unresolved recipients
     try { $Mail.Recipients.ResolveAll() | Out-Null } catch {}
+
+    # FIX: Explicitly set To/CC properties to ensure they appear in the UI pre-filled.
+    # This resolves issues where Recipients.Add() doesn't immediately reflect in the To: text box.
+    # We do this OUTSIDE the ResolveAll try/catch so it doesn't get skipped if resolution fails.
+    if ($resolvedList.Count -gt 0) {
+        $combined = $resolvedList -join "; "
+        if ($RecipientType -eq 1) { try { $Mail.To = $combined } catch {} }
+        elseif ($RecipientType -eq 2) { try { $Mail.CC = $combined } catch {} }
+    }
 }
 
 # Legacy Resolve-EmailAddress kept for any external callers.
@@ -419,6 +454,32 @@ function Get-OutlookSignature {
 }
 
 function Invoke-OutlookSendEmail {
+    <#
+    .SYNOPSIS
+    Sends an email automatically via Outlook.
+
+    .DESCRIPTION
+    Creates and immediately sends an email. Automatically resolves recipient names using the GAL, appends the user's signature, and attaches any specified files.
+
+    .PARAMETER To
+    A semicolon-separated list of recipient names or email addresses.
+
+    .PARAMETER Subject
+    The subject line of the email.
+
+    .PARAMETER Body
+    The body text of the email.
+
+    .PARAMETER CC
+    Optional. A semicolon-separated list of CC recipients.
+
+    .PARAMETER Attachments
+    Optional. An array of absolute file paths to attach.
+
+    .EXAMPLE
+    Invoke-OutlookSendEmail -To "asmith@example.com" -Subject "Report" -Body "Here is the report."
+    Sends an email to asmith.
+    #>
     param([string]$To, [string]$Subject, [string]$Body, [string]$CC = "", [array]$Attachments = @())
     Write-ToolLine "Outlook" "Sending email" "To: $To | Subject: $Subject"
     try {
@@ -451,21 +512,68 @@ function Invoke-OutlookSendEmail {
 }
 
 function Invoke-OutlookDraftEmail {
+    <#
+    .SYNOPSIS
+    Drafts an email and displays it in Outlook for user review.
+
+    .DESCRIPTION
+    Creates a new email item, pre-fills the To, Subject, Body, Signature, and Attachments, and then displays the Outlook Inspector window so the user can review and send it manually.
+
+    .PARAMETER To
+    A semicolon-separated list of recipient names or email addresses.
+
+    .PARAMETER Subject
+    The subject line of the email.
+
+    .PARAMETER Body
+    The body text of the email.
+
+    .PARAMETER Attachments
+    Optional. An array of absolute file paths to attach.
+
+    .EXAMPLE
+    Invoke-OutlookDraftEmail -To "Jane Doe" -Subject "Draft" -Body "Please review."
+    Opens an email draft addressed to Jane Doe.
+    #>
     param([string]$To, [string]$Subject, [string]$Body, [array]$Attachments = @())
     Write-ToolLine "Outlook" "Opening draft email" "To: $To"
     try {
         $outlook = New-Object -ComObject Outlook.Application
         $mail    = $outlook.CreateItem(0)
         $mail.Subject = $Subject
-        
+
         # Append signature to body
         $sig = Get-OutlookSignature
         $mail.Body = $Body + $sig
 
-        # Use Recipients API for proper GAL resolution — this is identical
-        # to typing a name in the To: field and pressing Tab.
-        Add-MailRecipients -Mail $mail -To $To -RecipientType 1
-        
+        # Resolve each recipient token to a raw SMTP email address and set
+        # $mail.To directly as a plain string — this is the most reliable way
+        # to pre-fill the To: field without depending on the Recipients COM API.
+        $tokens = $To -split '\s*(?:,\s*|\s+and\s+|;\s*)\s*' | Where-Object { $_.Trim() -ne '' }
+        $rawEmails = @()
+        foreach ($token in $tokens) {
+            $token = $token.Trim()
+            if (-not $token) { continue }
+            if ($token -match '@') {
+                $rawEmails += $token
+                Write-StatusLine "OK" "Using raw email: $token"
+            } else {
+                $resolved = Invoke-OutlookContactLookup -Name $token
+                if ($resolved -and $resolved -match '@') {
+                    $rawEmails += $resolved
+                    Write-StatusLine "OK" "Resolved '$token' → $resolved"
+                } else {
+                    # Fallback: use name as-is and let Outlook resolve on open
+                    $rawEmails += $token
+                    Write-StatusLine "WARN" "Could not resolve '$token' — using name as-is"
+                }
+            }
+        }
+
+        if ($rawEmails.Count -gt 0) {
+            $mail.To = $rawEmails -join "; "
+        }
+
         foreach ($file in $Attachments) {
             if ($file -and (Test-Path $file)) {
                 $mail.Attachments.Add($file) | Out-Null
@@ -515,6 +623,23 @@ function Get-OutlookEmail {
 }
 
 function Invoke-OutlookReplyEmail {
+    <#
+    .SYNOPSIS
+    Draft a reply to a specific email.
+
+    .DESCRIPTION
+    Finds an email matching the given query (index number or subject search) in the Inbox and generates a Reply-All draft containing the specified body text.
+
+    .PARAMETER Query
+    The subject text or the index number of the email in the Inbox to reply to.
+
+    .PARAMETER Body
+    The message text to insert above the original email thread.
+
+    .EXAMPLE
+    Invoke-OutlookReplyEmail -Query "Project Update" -Body "Thanks for the update."
+    Opens a draft reply to the 'Project Update' email.
+    #>
     param([string]$Query, [string]$Body)
     Write-ToolLine "Outlook" "Replying to email" $Query
     try {
@@ -531,6 +656,26 @@ function Invoke-OutlookReplyEmail {
 }
 
 function Invoke-OutlookForwardEmail {
+    <#
+    .SYNOPSIS
+    Draft a forward of a specific email.
+
+    .DESCRIPTION
+    Finds an email matching the given query and generates a Forward draft to the specified recipient(s).
+
+    .PARAMETER Query
+    The subject text or the index number of the email to forward.
+
+    .PARAMETER To
+    The recipient(s) to forward the email to.
+
+    .PARAMETER Body
+    The message text to insert above the forwarded thread.
+
+    .EXAMPLE
+    Invoke-OutlookForwardEmail -Query 1 -To "Boss" -Body "FYI on this thread."
+    Forwards the most recent email in the Inbox to 'Boss'.
+    #>
     param([string]$Query, [string]$To, [string]$Body)
     Write-ToolLine "Outlook" "Forwarding email" $Query
     try {
@@ -548,6 +693,20 @@ function Invoke-OutlookForwardEmail {
 }
 
 function Invoke-OutlookDeleteEmail {
+    <#
+    .SYNOPSIS
+    Delete a specific email.
+
+    .DESCRIPTION
+    Finds an email matching the given query and prompts the user for confirmation before moving it to the Deleted Items folder.
+
+    .PARAMETER Query
+    The subject text or index number of the email to delete.
+
+    .EXAMPLE
+    Invoke-OutlookDeleteEmail -Query "Spam Offer"
+    Prompts to delete the matching email.
+    #>
     param([string]$Query)
     Write-ToolLine "Outlook" "Deleting email" $Query
     try {
@@ -565,6 +724,20 @@ function Invoke-OutlookDeleteEmail {
 }
 
 function Invoke-OutlookFlagEmail {
+    <#
+    .SYNOPSIS
+    Flag a specific email for follow-up.
+
+    .DESCRIPTION
+    Finds an email matching the given query and marks it as a task (flagged) in Outlook.
+
+    .PARAMETER Query
+    The subject text or index number of the email to flag.
+
+    .EXAMPLE
+    Invoke-OutlookFlagEmail -Query 2
+    Flags the second most recent email in the Inbox.
+    #>
     param([string]$Query)
     Write-ToolLine "Outlook" "Flagging email" $Query
     try {

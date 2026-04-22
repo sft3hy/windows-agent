@@ -3,6 +3,23 @@
 # ============================================================
 
 function Invoke-OutlookReadCalendar {
+    <#
+    .SYNOPSIS
+    Read calendar appointments from Outlook.
+
+    .DESCRIPTION
+    Connects to the default Outlook Calendar folder and retrieves upcoming appointments sorted by start time. Can limit results by days ahead and max item count.
+
+    .PARAMETER DaysAhead
+    Number of days into the future to search for appointments. Default is 7.
+
+    .PARAMETER MaxItems
+    Maximum number of appointments to return. Default is 20.
+
+    .EXAMPLE
+    Invoke-OutlookReadCalendar -DaysAhead 3 -MaxItems 5
+    Gets up to 5 appointments occurring in the next 3 days.
+    #>
     param([int]$DaysAhead = 7, [int]$MaxItems = 20)
     Write-ToolLine "Calendar" "Reading appointments" "Next $DaysAhead days"
     try {
@@ -44,6 +61,35 @@ function Invoke-OutlookReadCalendar {
 }
 
 function Invoke-OutlookCreateAppointment {
+    <#
+    .SYNOPSIS
+    Create an appointment on the Outlook calendar.
+
+    .DESCRIPTION
+    Creates a new appointment item in the user's default calendar. You can specify start/end times, location, and description.
+
+    .PARAMETER Subject
+    The subject or title of the appointment.
+
+    .PARAMETER Start
+    The start date and time (e.g., '2026-04-17 14:00').
+
+    .PARAMETER End
+    Optional. The end date and time. If blank, defaults to 1 hour after the Start time.
+
+    .PARAMETER Location
+    Optional. The location of the appointment.
+
+    .PARAMETER Body
+    Optional. The description or body text of the appointment.
+
+    .PARAMETER Display
+    Optional switch. If specified, the appointment window is displayed to the user instead of being saved silently.
+
+    .EXAMPLE
+    Invoke-OutlookCreateAppointment -Subject "Dentist" -Start "2026-05-01 09:00" -Location "Downtown Clinic"
+    Creates a 1-hour appointment for the dentist.
+    #>
     param(
         [string]$Subject,
         [string]$Start,       # e.g. "2026-04-17 14:00"
@@ -82,6 +128,38 @@ function Invoke-OutlookCreateAppointment {
 }
 
 function Invoke-OutlookCreateMeeting {
+    <#
+    .SYNOPSIS
+    Create a meeting request with attendees on the Outlook calendar.
+
+    .DESCRIPTION
+    Creates a new meeting request, resolves the provided attendee names or email addresses, and sends the invitation.
+
+    .PARAMETER Subject
+    The subject or title of the meeting.
+
+    .PARAMETER Start
+    The start date and time (e.g., '2026-04-17 14:00').
+
+    .PARAMETER End
+    Optional. The end date and time. If blank, defaults to 1 hour after the Start time.
+
+    .PARAMETER Location
+    Optional. The location of the meeting.
+
+    .PARAMETER Body
+    Optional. The description or agenda.
+
+    .PARAMETER Attendees
+    An array of attendee names or email addresses.
+
+    .PARAMETER Display
+    Optional switch. If specified, the meeting window is displayed for review instead of being sent automatically.
+
+    .EXAMPLE
+    Invoke-OutlookCreateMeeting -Subject "Project Sync" -Start "2026-05-02 10:00" -Attendees @("Alice", "bob@example.com")
+    Creates a meeting and adds Alice and Bob as required attendees.
+    #>
     param(
         [string]$Subject,
         [string]$Start,
@@ -133,6 +211,20 @@ function Invoke-OutlookCreateMeeting {
 }
 
 function Invoke-OutlookDeleteAppointment {
+    <#
+    .SYNOPSIS
+    Delete an appointment from the Outlook calendar.
+
+    .DESCRIPTION
+    Searches the upcoming 60 days of the calendar for an appointment matching the given subject. If found, prompts the user for confirmation before deleting.
+
+    .PARAMETER Subject
+    The exact or partial subject of the appointment to delete.
+
+    .EXAMPLE
+    Invoke-OutlookDeleteAppointment -Subject "Dentist"
+    Prompts to delete the upcoming 'Dentist' appointment.
+    #>
     param([string]$Subject)
     Write-ToolLine "Calendar" "Deleting appointment" $Subject
     try {

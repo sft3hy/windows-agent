@@ -3,6 +3,29 @@
 # ============================================================
 
 function Invoke-WordCreateDocument {
+    <#
+    .SYNOPSIS
+    Create a new Microsoft Word document.
+
+    .DESCRIPTION
+    Uses Word COM automation to generate a new .docx file. You can specify an optional Title (formatted as Heading 1) and Body text (split into paragraphs). Can optionally display the document immediately upon creation.
+
+    .PARAMETER FilePath
+    The absolute path where the .docx file will be saved.
+
+    .PARAMETER Title
+    Optional. A title string inserted at the top of the document as a 'Heading 1'.
+
+    .PARAMETER Body
+    Optional. The main text content of the document.
+
+    .PARAMETER Display
+    Optional switch. If specified, the Word window remains open and visible after creation. Otherwise, the file is saved and closed silently.
+
+    .EXAMPLE
+    Invoke-WordCreateDocument -FilePath "C:\Doc.docx" -Title "Meeting Notes" -Body "Discussed project timelines."
+    Creates a new Word document with a title and single paragraph.
+    #>
     param(
         [string]$FilePath,
         [string]$Title   = "",
@@ -60,6 +83,20 @@ function Invoke-WordCreateDocument {
 }
 
 function Invoke-WordOpenDocument {
+    <#
+    .SYNOPSIS
+    Open a Microsoft Word document in the UI.
+
+    .DESCRIPTION
+    Launches the Word application and makes the specified document visible to the user for editing.
+
+    .PARAMETER FilePath
+    The absolute path to the .docx file.
+
+    .EXAMPLE
+    Invoke-WordOpenDocument -FilePath "C:\Doc.docx"
+    Opens Doc.docx in Word.
+    #>
     param([string]$FilePath)
     Write-ToolLine "Word" "Opening document" $FilePath
     try {
@@ -76,6 +113,23 @@ function Invoke-WordOpenDocument {
 }
 
 function Invoke-WordAppendText {
+    <#
+    .SYNOPSIS
+    Append text to an existing Word document.
+
+    .DESCRIPTION
+    Opens a Word document in the background, moves the cursor to the very end of the file, inserts the specified text as new paragraphs, and saves the file.
+
+    .PARAMETER FilePath
+    The absolute path to the .docx file.
+
+    .PARAMETER Text
+    The text to append.
+
+    .EXAMPLE
+    Invoke-WordAppendText -FilePath "C:\Doc.docx" -Text "Addendum: approved."
+    Adds the text to the end of the document.
+    #>
     param([string]$FilePath, [string]$Text)
     Write-ToolLine "Word" "Appending text" $FilePath
     try {
@@ -107,6 +161,26 @@ function Invoke-WordAppendText {
 }
 
 function Invoke-WordReplaceText {
+    <#
+    .SYNOPSIS
+    Find and replace text in a Word document.
+
+    .DESCRIPTION
+    Performs a global find-and-replace operation across the entire Word document in the background, then saves the file.
+
+    .PARAMETER FilePath
+    The absolute path to the .docx file.
+
+    .PARAMETER SearchText
+    The string to look for.
+
+    .PARAMETER ReplaceText
+    The string to replace it with.
+
+    .EXAMPLE
+    Invoke-WordReplaceText -FilePath "C:\Template.docx" -SearchText "[NAME]" -ReplaceText "Alice"
+    Replaces all instances of [NAME] with Alice.
+    #>
     param([string]$FilePath, [string]$SearchText, [string]$ReplaceText)
     Write-ToolLine "Word" "Replacing text" "'$SearchText' -> '$ReplaceText'"
     try {

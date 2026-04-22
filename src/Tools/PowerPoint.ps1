@@ -3,6 +3,23 @@
 # ============================================================
 
 function Invoke-PowerPointCreate {
+    <#
+    .SYNOPSIS
+    Create a new PowerPoint presentation from JSON data.
+
+    .DESCRIPTION
+    Launches PowerPoint and dynamically builds a presentation slide-by-slide based on a provided JSON array containing title and content fields. Features a robust save mechanism that bypasses COM save errors on network drives by saving locally and copying.
+
+    .PARAMETER FilePath
+    The absolute path where the new .pptx file should be saved.
+
+    .PARAMETER SlidesJson
+    A JSON string array containing slide objects (e.g., '[{"title":"Slide 1","content":"Bullet 1\nBullet 2"}]').
+
+    .EXAMPLE
+    Invoke-PowerPointCreate -FilePath "C:\Pres.pptx" -SlidesJson '[{"title":"Intro","content":"Hello"}]'
+    Creates a 1-slide presentation.
+    #>
     param([string]$FilePath, [string]$SlidesJson)
     Write-ToolLine "PowerPoint" "Creating presentation" $FilePath
     try {
@@ -56,6 +73,20 @@ function Invoke-PowerPointCreate {
 }
 
 function Invoke-PowerPointOpen {
+    <#
+    .SYNOPSIS
+    Open a PowerPoint presentation.
+
+    .DESCRIPTION
+    Launches the PowerPoint application and makes the specified presentation visible to the user.
+
+    .PARAMETER FilePath
+    The absolute path to the .pptx file.
+
+    .EXAMPLE
+    Invoke-PowerPointOpen -FilePath "C:\Pres.pptx"
+    Opens Pres.pptx in the PowerPoint UI.
+    #>
     param([string]$FilePath)
     Write-ToolLine "PowerPoint" "Opening file" $FilePath
     try {
