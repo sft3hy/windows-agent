@@ -31,35 +31,75 @@ function Invoke-OutlookReadEmails {
         $targetFolder = $ns.GetDefaultFolder(6)  # 6 = olFolderInbox
 
         if ($Folder -ne "Inbox") {
-            # Walk the first store's folder tree to find a matching sub-folder
-            $storeFolder = $ns.Folders.Item(1)  # first mail account store
+            $storeFolder = $ns.Folders.Item(1)
             $found = $storeFolder.Folders | Where-Object { $_.Name -like "*$Folder*" } | Select-Object -First 1
             if (-not $found) {
-                # Recursively check sub-folders of Inbox
                 $found = $ns.GetDefaultFolder(6).Folders | Where-Object { $_.Name -like "*$Folder*" } | Select-Object -First 1
             }
             if ($found) { $targetFolder = $found }
             else         { Write-StatusLine "WARN" "Folder '$Folder' not found, defaulting to Inbox" }
         }
 
+        # Clean LLM search operators (from:, subject:, etc.) and split into keywords
+        $cleanFilter = $Filter -replace '(?i)\b(from|to|subject|in|is|has|label):', ' '
+        $cleanFilter = $cleanFilter.Trim()
+        $keywords = @($cleanFilter -split '\s+' | Where-Object { $_.Length -ge 2 })
+
         $items = $targetFolder.Items
-        try { $items.Sort("[ReceivedTime]", $true) } catch { <# ignore for non-mail folders #> }
-        $results = @()
-        $i = 0
-        foreach ($item in $items) {
-            if ($i -ge $Count) { break }
-            if ($Filter -and $item.Subject -notlike "*$Filter*" -and $item.SenderName -notlike "*$Filter*") { continue };
-            $results += @{
-                Index       = $i + 1
-                Subject     = $item.Subject
-                Sender      = $item.SenderName
-                SenderEmail = $item.SenderEmailAddress
-                Received    = try { $item.ReceivedTime.ToString("yyyy-MM-dd HH:mm") } catch { "" };
-                Body        = $item.Body.Substring(0, [Math]::Min(500, $item.Body.Length))
-            }
-            $i++
+        try { $items.Sort("[ReceivedTime]", $true) } catch { <# ignore #> }
+
+        # Try Outlook DASL Restrict for speed if we have keywords
+        if ($keywords.Count -gt 0) {
+            $primaryKw = ($keywords[0]) -replace "'", "''"
+            $dasl = "@SQL=(""urn:schemas:httpmail:subject"" LIKE '%$primaryKw%' OR ""urn:schemas:httpmail:displayfrom"" LIKE '%$primaryKw%')"
+            try {
+                $restricted = $items.Restrict($dasl)
+                if ($restricted.Count -gt 0) {
+                    Write-StatusLine "INFO" "DASL matched $($restricted.Count) items for '$primaryKw'"
+                    $items = $restricted
+                }
+            } catch { Write-StatusLine "WARN" "DASL filter failed, full scan: $_" }
         }
-        Write-StatusLine "OK" "Retrieved $($results.Count) emails"
+
+        $results = @()
+        $scanned = 0
+        $maxScan = 200
+        foreach ($item in $items) {
+            if ($results.Count -ge $Count) { break }
+            if ($scanned -ge $maxScan) { break }
+            $scanned++
+
+            # Multi-keyword match: ALL keywords must appear in subject, sender, or email
+            if ($keywords.Count -gt 0) {
+                $subj   = if ($item.Subject) { $item.Subject } else { "" }
+                $sender = if ($item.SenderName) { $item.SenderName } else { "" }
+                $sEmail = if ($item.SenderEmailAddress) { $item.SenderEmailAddress } else { "" }
+                $searchable = "$subj $sender $sEmail"
+                $allMatch = $true
+                foreach ($kw in $keywords) {
+                    if ($searchable -notmatch [regex]::Escape($kw)) {
+                        $allMatch = $false; break
+                    }
+                }
+                if (-not $allMatch) { continue }
+            }
+
+            $subj   = if ($item.Subject) { $item.Subject } else { "" }
+            $send   = if ($item.SenderName) { $item.SenderName } else { "" }
+            $email  = if ($item.SenderEmailAddress) { $item.SenderEmailAddress } else { "" }
+            $recv   = try { $item.ReceivedTime.ToString("yyyy-MM-dd HH:mm") } catch { "" }
+            $body   = if ($item.Body) { $item.Body.Substring(0, [Math]::Min(500, $item.Body.Length)) } else { "" }
+
+            $results += @{
+                Index       = $results.Count + 1
+                Subject     = $subj
+                Sender      = $send
+                SenderEmail = $email
+                Received    = $recv
+                Body        = $body
+            }
+        }
+        Write-StatusLine "OK" "Retrieved $($results.Count) emails (scanned $scanned)"
         return $results | ConvertTo-Json -Depth 3
     } catch {
         Write-StatusLine "ERR" "Outlook error: $_"

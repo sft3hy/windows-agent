@@ -35,6 +35,19 @@ function Stop-Spinner {
     if ($script:SpinnerShared) {
         $script:SpinnerShared.Running = $false
         Start-Sleep -Milliseconds 200
-        try { $script:SpinnerPS.EndInvoke($script:SpinnerHandle); $script:SpinnerPS.Dispose(); $script:SpinnerRS.Close() } catch {}
+        try { 
+            if ($script:SpinnerPS) {
+                $script:SpinnerPS.EndInvoke($script:SpinnerHandle)
+                $script:SpinnerPS.Dispose()
+            }
+            if ($script:SpinnerRS) {
+                $script:SpinnerRS.Close()
+                $script:SpinnerRS.Dispose()
+            }
+        } catch {}
+        $script:SpinnerShared = $null
+        $script:SpinnerPS = $null
+        $script:SpinnerRS = $null
+        $script:SpinnerHandle = $null
     }
 }

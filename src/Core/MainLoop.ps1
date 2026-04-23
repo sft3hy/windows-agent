@@ -17,60 +17,79 @@ function Start-AgentSession {
         $enrichedInput = Invoke-PreFlight -UserInput $userInput
         $conversationHistory += @{ role = "user"; content = $enrichedInput }
 
-        $keepLooping = $true
-        while ($keepLooping) {
-            Write-Host ""
-            Start-Spinner -Word (Get-ThinkingWord)
-            $responseText = Invoke-GeminiAPI -Messages $conversationHistory
-            Stop-Spinner
+        try {
+            $keepLooping = $true
+            $loopCount = 0
+            $maxLoops = 10
+            while ($keepLooping) {
+                $loopCount++
+                if ($loopCount -gt $maxLoops) {
+                    Write-Host ""
+                    Write-StatusLine "WARN" "Reached maximum of $maxLoops tool iterations. Breaking out."
+                    break
+                }
 
-            $displayText = $responseText
-            $displayText = $displayText -replace '<SLIDES>[\s\S]*?</SLIDES>',     '[PowerPoint queued]'
-            $displayText = $displayText -replace '<JABBER>[\s\S]*?</JABBER>',     '[Jabber message queued]'
-            $displayText = $displayText -replace '<EMAIL>[\s\S]*?</EMAIL>',       '[Email queued]'
-            $displayText = $displayText -replace '<WORD>[\s\S]*?</WORD>',         '[Word document queued]'
-            $displayText = $displayText -replace '<EXCEL>[\s\S]*?</EXCEL>',        '[Excel action queued]'
-            $displayText = $displayText -replace '<BROWSER>[\s\S]*?</BROWSER>',   '[Browser action queued]'
-            $displayText = $displayText -replace '<RESEARCH>[\s\S]*?</RESEARCH>', '[Web research queued]'
-            $displayText = $displayText -replace '<CALENDAR>[\s\S]*?</CALENDAR>', '[Calendar action queued]'
-            $displayText = $displayText -replace '<OPEN>[\s\S]*?</OPEN>',         '[File open queued]'
-            $displayText = $displayText -replace '<UIAUTOMATION>[\s\S]*?</UIAUTOMATION>', '[UI Automation action queued]'
-            $displayText = $displayText -replace '<DONE>', ''
-            
-            if ($displayText.Trim()) {
-                Write-Host "`n  [AIRWAV] " -NoNewline -ForegroundColor Cyan
-                Write-Host $displayText.Trim() -ForegroundColor White
-            }
+                Write-Host ""
+                Start-Spinner -Word (Get-ThinkingWord)
+                $responseText = Invoke-GeminiAPI -Messages $conversationHistory
+                Stop-Spinner
 
-            $conversationHistory += @{ role = "assistant"; content = $responseText }
+                if ($responseText -match '^ERROR:') {
+                    Write-StatusLine "ERR" "Fatal API error encountered. Exiting session."
+                    $keepLooping = $false
+                    return # Exit Start-AgentSession entirely
+                }
 
-            if ($responseText -match '<DONE>') {
-                $keepLooping = $false
-                break
-            }
+                $displayText = $responseText
+                $displayText = $displayText -replace '<SLIDES>[\s\S]*?</SLIDES>',     '[PowerPoint queued]'
+                $displayText = $displayText -replace '<JABBER>[\s\S]*?</JABBER>',     '[Jabber message queued]'
+                $displayText = $displayText -replace '<EMAIL>[\s\S]*?</EMAIL>',       '[Email queued]'
+                $displayText = $displayText -replace '<WORD>[\s\S]*?</WORD>',         '[Word document queued]'
+                $displayText = $displayText -replace '<EXCEL>[\s\S]*?</EXCEL>',        '[Excel action queued]'
+                $displayText = $displayText -replace '<BROWSER>[\s\S]*?</BROWSER>',   '[Browser action queued]'
+                $displayText = $displayText -replace '<RESEARCH>[\s\S]*?</RESEARCH>', '[Web research queued]'
+                $displayText = $displayText -replace '<CALENDAR>[\s\S]*?</CALENDAR>', '[Calendar action queued]'
+                $displayText = $displayText -replace '<OPEN>[\s\S]*?</OPEN>',         '[File open queued]'
+                $displayText = $displayText -replace '<UIAUTOMATION>[\s\S]*?</UIAUTOMATION>', '[UI Automation action queued]'
+                $displayText = $displayText -replace '<DONE>', ''
+                
+                if ($displayText.Trim()) {
+                    Write-Host "`n  [AIRWAV] " -NoNewline -ForegroundColor Cyan
+                    Write-Host $displayText.Trim() -ForegroundColor White
+                }
 
-            $actions = Invoke-PostFlight -ResponseText $responseText
-            $feedbackText = ""
-            
-            if ($actions -and $actions.Count -gt 0) {
-                Write-Divider "ACTIONS COMPLETED"
-                foreach ($a in $actions) {
-                    if ($a -is [hashtable] -and $a.type -eq "feed_back") {
-                        Write-StatusLine "OK" "Data scraped; returning to AI for analysis."
-                        $feedbackText += $a.text + "`n`n"
-                    } else {
-                        Write-StatusLine "OK" $a
-                        $feedbackText += $a + "`n`n"
+                $conversationHistory += @{ role = "assistant"; content = $responseText }
+
+                if ($responseText -match '<DONE>') {
+                    $keepLooping = $false
+                    break
+                }
+
+                $actions = Invoke-PostFlight -ResponseText $responseText
+                $feedbackText = ""
+                
+                if ($actions -and $actions.Count -gt 0) {
+                    Write-Divider "ACTIONS COMPLETED"
+                    foreach ($a in $actions) {
+                        if ($a -is [hashtable] -and $a.type -eq "feed_back") {
+                            Write-StatusLine "OK" "Data scraped; returning to AI for analysis."
+                            $feedbackText += $a.text + "`n`n"
+                        } else {
+                            Write-StatusLine "OK" $a
+                            $feedbackText += $a + "`n`n"
+                        }
                     }
                 }
-            }
 
-            if ($feedbackText) {
-                $conversationHistory += @{ role = "user"; content = "TOOL RESULTS:`n" + $feedbackText.Trim() }
-            } else {
-                # Infinite loop prevention
-                $conversationHistory += @{ role = "user"; content = "SYSTEM: You did not output any tool tags, and you did not output <DONE>. If the user's request is complete, you MUST output <DONE>. Otherwise, use a tool." }
+                if ($feedbackText) {
+                    $conversationHistory += @{ role = "user"; content = "TOOL RESULTS:`n" + $feedbackText.Trim() }
+                } else {
+                    # Infinite loop prevention
+                    $conversationHistory += @{ role = "user"; content = "SYSTEM: You did not output any tool tags, and you did not output <DONE>. If the user's request is complete, you MUST output <DONE>. Otherwise, use a tool." }
+                }
             }
+        } finally {
+            Stop-Spinner
         }
     }
 }

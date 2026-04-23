@@ -1,5 +1,9 @@
 #Requires -Version 5.1
+param([switch]$LoadOnly)
+
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+# Enforce TLS 1.2 and 1.3 for enterprise API connectivity
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
 
 $ProjectRoot = $PSScriptRoot
 
@@ -16,4 +20,6 @@ foreach ($folder in $folders) {
 }
 
 # 3. Start Agent
-Start-AgentSession
+if (-not $LoadOnly) {
+    Start-AgentSession
+}

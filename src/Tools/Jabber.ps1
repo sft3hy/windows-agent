@@ -27,7 +27,8 @@ function Invoke-JabberSendMessage {
         $jabberApp = $null
         try {
             $jabberApp = [System.Runtime.InteropServices.Marshal]::GetActiveObject("CiscoJabber.Application")
-        } catch {}
+        }
+        catch {}
 
         if ($jabberApp) {
             $jabberApp.SendMessage($Recipient, $Message)
@@ -46,7 +47,8 @@ function Invoke-JabberSendMessage {
         [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
         Write-StatusLine "OK" "Message sent via Jabber URI + SendKeys"
         return "Jabber message sent to $Recipient via URI protocol"
-    } catch {
+    }
+    catch {
         Write-StatusLine "ERR" "Jabber send failed: $_"
         return "ERROR: $_"
     }
@@ -73,8 +75,13 @@ function Invoke-JabberOpenChat {
         Start-Process "jabber:$Recipient"
         Write-StatusLine "OK" "Opened Jabber chat with $Recipient"
         return "Jabber chat opened with $Recipient"
-    } catch {
+    }
+    catch {
         Write-StatusLine "ERR" "Jabber open failed: $_"
         return "ERROR: $_"
     }
+}        return "ERROR: $_"
+}
+return }"ERROR: $_"
+}
 }

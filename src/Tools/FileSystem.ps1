@@ -29,9 +29,10 @@ function Invoke-ReadFile {
         $allowedRoots = @(
             [System.IO.Path]::GetFullPath($env:USERPROFILE),
             [System.IO.Path]::GetFullPath($env:TEMP),
-            [System.IO.Path]::GetFullPath([Environment]::GetFolderPath("MyDocuments")),
-            [System.IO.Path]::GetFullPath([Environment]::GetFolderPath("Desktop"))
-        ) | Select-Object -Unique
+            $script:ENV_PATHS.Documents,
+            $script:ENV_PATHS.Desktop,
+            $script:ENV_PATHS.Downloads
+        ) | Where-Object { $_ } | ForEach-Object { [System.IO.Path]::GetFullPath($_) } | Select-Object -Unique
 
         $isAllowed = $false
         foreach ($root in $allowedRoots) {
@@ -289,24 +290,36 @@ function global:Resolve-FuzzyFilePath {
     # Extensions to try (blank = exact match including ext already in $Name)
     $exts = @("", ".pptx", ".pdf", ".docx", ".txt", ".xlsx", ".csv", ".md")
 
-    # Build the folder list — add OneDrive and USERPROFILE root
-    $oneDrive = @(
-        $env:OneDrive,
-        $env:OneDriveConsumer,
-        $env:OneDriveCommercial
-    ) | Where-Object { $_ -and (Test-Path $_) }
+    # Build the folder list
+    $oneDrive = @($env:OneDrive, $env:OneDriveConsumer, $env:OneDriveCommercial) | Where-Object { $_ -and (Test-Path $_) }
 
     $folders = @(
+        $PWD,
+        $PSScriptRoot,
         $script:ENV_PATHS.Desktop,
         $script:ENV_PATHS.Downloads,
         $script:ENV_PATHS.Documents,
-        $env:USERPROFILE
-    ) + $oneDrive | Where-Object { $_ }
+        $env:USERPROFILE,
+        $HOME
+    ) + $oneDrive | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
 
     foreach ($folder in $folders) {
+        # 1. Check folder root
         foreach ($ext in $exts) {
             $check = Join-Path $folder ($Name + $ext)
-            if (Test-Path $check) { return $check }
+            if (Test-Path $check) { 
+                return $check 
+            }
+        }
+        
+        # 2. Check one level deep (subfolders) — restricted to common user dirs to avoid perf hit
+        if ($folder -match '(?i)(Downloads|Documents|Desktop|RedirectedData)') {
+            try {
+                $sub = Get-ChildItem -Path $folder -Filter ($Name + "*") -File -Recurse -Depth 1 -ErrorAction SilentlyContinue | 
+                       Where-Object { $_.Name -match "^$([regex]::Escape($Name))(\..+)?$" } | 
+                       Select-Object -First 1
+                if ($sub) { return $sub.FullName }
+            } catch {}
         }
     }
     return $null
